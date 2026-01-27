@@ -1,0 +1,261 @@
+\documentclass[11pt,letterpaper]{article} % Page layout
+\usepackage[margin=0.8in]{geometry}
+\usepackage{setspace, indentfirst}
+\usepackage{amsmath, amssymb, amsfonts, amsthm, bm, commath} % Math
+\usepackage{graphicx, subcaption, wrapfig, caption} % Figures
+\usepackage{sidecap, caption}
+\usepackage{xcolor, enumitem} % Text / formatting
+\usepackage[small,compact]{titlesec}
+\usepackage[superscript,biblabel]{cite}
+\usepackage{hyperref, url} % Citations / links
+\newcommand{\inlinecomment}[1]{}
+
+\pagenumbering{gobble}
+\topmargin=-0.45in
+\headsep=0.25in
+\title{\vspace{-2.5cm} Weighted Adaptive Stimulation After Batch-testing Identification (WASABI) Problem Formulation \\
+  \large  \vspace{-0.4cm}}
+% \author{Student: Bryan Tseng, Advisors: Adam S. Charles}
+\date{\vspace{-0.5cm}}
+\begin{document}
+
+\maketitle
+\vspace{-0.7cm}
+
+\subsection*{There are a few ways we can formulate the question}
+\begin{enumerate}
+    \item Similar to Draelos 2020 first identify the binary connections using group testing, then use the identified connection to fit a weighted model.
+    \item Directly use a linear-Poisson model to identify weights using group testing. (Works on the assumption that connections are linear)
+    \item If not linear, use NN or some other nonlinear approaches.
+\end{enumerate}
+We will focus on (2) first, with fixed continuous stimulation parameters (e.g., current, frequency, pulse width).
+\subsection*{Poisson MLE for rate estimation}
+\[
+\begin{aligned}
+\text{Let } & x_i \in \{0,1\} 
+&& \text{be the selection of stimulation channels } i,
+\quad i = 1,\ldots,N \\
+\text{Let } & r \in \mathbb{R}^M
+&& \text{be the recorded response from } M \text{ recording channels}
+\end{aligned}
+\]
+We assume a linear-Poisson model where the response is generated as:
+\[
+\begin{aligned}
+r_j &\sim \text{Poisson}(\lambda_j), \text{where } \lambda_j 
+= \sum_{k=1}^K D_{jk}\, z_k + b_j^{prestim} \\
+\lambda_{j}  &:\ \text{firing rate of channel j} \\
+D_{jk} &:\ \text{weight from latent variable } k \text{ to recording channel } j \\
+z_{k}  &:\ \text{latent variable k (Assumes rate to stim-channel relationship is low-rank)} \\
+K      &:\ \text{total number of latent variables} \\
+b_j^{prestim}    &:\ \text{baseline firing rate of recording channel } j \text{ identified from the prestim period}
+\end{aligned}
+\]
+
+We further define the matrix $W = [w_{ki}]$ which identifies the mapping from the stimulation pattern $x_{i}$ to latent variable $z_{k}$
+\[
+\begin{aligned}
+z_k =  \sum_{i=1}^NW_{ki}\, x_i\\
+\end{aligned}
+\]
+
+Given a set of stimulation patterns and recorded responses $\{(x_t, r_t)\}_{t=1}^T$, where $T$ is the number of trials. The Poisson likelihood is
+\begin{equation}
+    \mathcal{L}(r; \lambda) = \prod_{t=1}^T \prod_{j=1}^M \frac{e^{-\lambda_j} (\lambda_j)^{r_j}}{r_j!}
+\end{equation}
+
+{\centering 
+where $\lambda_j = \sum_{i=1}^K D_{ji} W_{ki}x_i + b_j^{prestim}$\par}
+This gives the log-likelihood:
+\begin{equation}
+    \log \mathcal{L}(r; \lambda) = \sum_{t=1}^T \sum_{j=1}^M \left( -\lambda_j + r_j \log \lambda_j - \log r_j! \right)
+\end{equation}
+Constraints:
+\begin{itemize}
+    \item $\lambda_{j} \geq 0$ (non-negative firing rate) or just use softplus link function, which cancels out with log?
+    \item $b_{j} \geq 0$ (non-negative baseline firing rate)
+\end{itemize}
+
+\newpage
+
+\subsection*{Minimizing the posterior covariance of W (Gaussian)}
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\textbf{x}_{t}$ that maximizes the expected information gain about \textbf{W}. Equivalently, this would be selecting $\textbf{x}_{t}$ that minimizes the determinant of the covariance of \textbf{W} at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\textbf{W}^*$ in our formulation.
+
+\begin{equation}
+    \lambda_t =\textbf{D}\textbf{W}\textbf{x}_t+\textbf{b}^{prestim}
+\end{equation}
+
+Here, we are trying to find the optimal $\textbf{W}^*$, where $\lambda_t$, $\textbf{x}_t$, and $\textbf{b}^{prestim}$ are known.
+\[
+\begin{aligned}
+\text{Let } & \Sigma_{t-1}
+&& \text{be the covariance matrix of \textbf{W} before trial $t-1$}\\
+\text{Let } & \beta
+&& \text{be how we scale our data relative to our prior (could be $1/n$)}
+\end{aligned}
+\]
+
+In terms of precision, we can formulate the Gaussian case as:
+\begin{equation}
+    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T
+\end{equation}
+
+Take the determinant
+\[
+    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T)
+\]
+
+using the matrix inversion lemma:
+\[
+    \text{det}(\textbf{A} + \textbf{u}\textbf{v}^T) = (1 + \textbf{v}^T\textbf{A}^{-1}\textbf{u})\text{det}(\textbf{A})
+\]
+\[
+    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T \Sigma_{t-1} \mathbb{E}[\lambda_t\mid \textbf{x}_{t}])\det(\Sigma_{t-1}^{-1})
+\]
+
+Since we minimize over $x_{t}$, the objective function is therefore:
+\[
+\begin{aligned}
+    \arg\max_{x}\; \det\big(\Sigma_{t}^{-1}\big)
+    &= \arg\max_{x}\;  \big(1+ \beta \,\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
+    &= \arg\max_{x}\; \beta \,\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]
+\end{aligned}
+\]
+
+We can further expand out:
+\[
+\begin{aligned}
+    \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]=\hat{\textbf{D}}_{t-1}\hat{\textbf{W}}_{t-1}\textbf{x}_{t}+\textbf{b}^{prestim}
+\end{aligned}
+\]
+where $\hat{\textbf{D}}_{t-1}$ and $\hat{\textbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
+and $\textbf{b}^{prestim}$ is baseline firing rate identified from the prestim period.
+
+% Need to find the correct way to express how x affects the uncertainty of W
+% Then take the nuclear norm and then max min (E optimality)
+% max min singular value of precision 
+
+
+\subsection*{TODO}
+\begin{itemize}
+    \item Since x is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\textbf{x}$
+    \item Try to find closed form after plugging in E[$\lambda$]?
+    \item Forgot to index via trial in Poisson MLE section?
+    \item Projected is projecting the final to discrete, proximal is projecting each step
+    \item Softplus as a rectifier for $\lambda$
+    \item Combine Poisson MLE rate estimation and optimization of x into an algorithm
+    % \item Also need to add "state" about movement vs at rest
+\end{itemize}
+
+
+
+
+% \begin{SCfigure}[1][h!]
+%     \includegraphics[width=0.4\textwidth]{fig1.png}
+%     \caption{At slackness = 0.5 of the dual variable $\lambda_{1}$, there are two optimal experiments}
+%     \label{fig1}
+% \end{SCfigure}
+
+% \subsection*{D-Optimal experiments}
+% For adaptive selection of stimulation patterns, at each trial $t$, we want to select $x_t$ that maximizes the expected information gain about $W$. We formalize this using D-optimal experimental design, where we minimize the log-determinant of the Fisher information matrix. That is, we want to minimize the volume of the confidence ellipsoids for a fixed confidence level. First, we derive the Poisson Fisher information matrix.
+
+% \subsection*{Derivation of the Poisson Fisher information matrix}
+% Let $\theta \in \mathbb{R}^{K\times N}$ denote the vectorized version of $W$ (e.g.\ $\theta=\mathrm{vec}(W)$). This is essentially the list of unknown parameters.
+% Assume conditionally independent observations (responses) $\{r_j\}_{j=1}^M$ with
+% \[
+% r_j \mid \theta \sim \mathrm{Poisson}\big(\lambda_j(\theta)\big),
+% \qquad \lambda_j(\theta) \ge 0
+% \]
+
+% The latent variables are $z_{k} = W_{ki}x_{i}$, and the mean firing rate at recording channel $j$ is:
+% \[
+% \lambda_j(\theta)
+% = \sum_{k=1}^K D_{jk} z_k + b_j
+% = \sum_{k=1}^K \sum_{i=1}^N D_{jk} W_{ki} x_i + b_j
+% \]
+
+% \subsection*{Score function}
+% The score function is the gradient of the likelihood relative to the parameters. 
+% The log-likelihood for a single trial $t$ is:
+% \[
+% \ell(\theta)
+% = \sum_{j=1}^M \left(
+% r_j \log \lambda_j(\theta)
+% - \lambda_j(\theta)
+% - \log(r_j!)
+% \right)
+% \]
+
+% Differentiating the MLE with respect to $\theta$ gives
+% \[
+% \nabla_\theta \ell(\theta)
+% = \sum_{j=1}^M
+% \left(
+% \frac{r_j}{\lambda_j(\theta)} - 1
+% \right)
+% \nabla_\theta \lambda_j(\theta) \quad \text{by chain rule.}
+% \]
+
+% \subsection*{Fisher information}
+% The Fisher information matrix is the  for a single trial $t$ is
+% \[
+% \mathcal{I}(\theta)
+% := \mathbb{E}\left[
+% \nabla_\theta \ell(\theta)
+% \nabla_\theta \ell(\theta)^\top
+% \,\middle|\, \theta
+% \right]
+% \]
+
+% Since $\{r_j\}_{j=1}^M$ are independent given theta, we use the identity
+% \[
+% \mathbb{E}\left[
+% \left(
+% \frac{r_j}{\lambda_j} - 1
+% \right)^2
+% \right]
+% = \frac{1}{\lambda_j}
+% \]
+% {\centering we obtain\par}
+% \[
+% \boxed{
+% \mathcal{I}(\theta)
+% = \sum_{j=1}^M
+% \frac{1}{\lambda_j(\theta)}
+% \nabla_\theta \lambda_j(\theta)\nabla_\theta \lambda_j(\theta)^\top
+% }
+% \quad \text{with dimension } \mathbb{R}^{KN \times KN}
+% \]
+
+% Because: 
+% \[
+% \frac{\partial \lambda_j}{\partial W_{ki}}
+% = D_{jk} x_i
+% \quad
+% \text{and}
+% \quad
+% \nabla_\theta \lambda_j(\theta) = \frac{\partial \lambda_j}{\partial \theta}
+% = x \otimes D_{j,:} 
+% \in \mathbb{R}^{KN}
+% \]
+% {\centering where $D_{j,:}$ is the $j$th row of $D$. \par}
+
+% Assuming each trial is independent, the total Fisher information is additive:
+% \[
+% \mathcal{I}_T(\theta)
+% = \sum_{t=1}^T \mathcal{I}(\theta)
+% \]
+% \subsection*{Optimization objective}
+% Although Fisher information is with respect to W, the parameter we want to optimize is the choice of x.
+% \begin{equation}
+% \text{argmin}_{x \in \{0, 1\}}
+% -\log \det\bigl( \mathcal{I}_{1:t-1} + \mathcal{I}_t(x) \bigr)
+% \end{equation}
+
+
+\vspace{-1cm}
+\end{document}
+
+
+
+
