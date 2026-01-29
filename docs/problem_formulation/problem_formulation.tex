@@ -61,7 +61,7 @@ z_k =  \sum_{i=1}^NW_{ki}\, x_i\\
 
 Given a set of stimulation patterns and recorded responses $\{(x_t, r_t)\}_{t=1}^T$, where $T$ is the number of trials. The Poisson likelihood is
 \begin{equation}
-    \mathcal{L}(r; \lambda) = \prod_{t=1}^T \prod_{j=1}^M \frac{e^{-\lambda_j} (\lambda_j)^{r_j}}{r_j!}
+    \mathcal{L}(r; \lambda) = \prod_{t=1}^T \prod_{j=1}^M \frac{e^{-\lambda_{j, t}} (\lambda_{j, t})^{r_{j, t}}}{r_{j, t}!}
 \end{equation}
 
 {\centering 
@@ -79,13 +79,13 @@ Constraints:
 \newpage
 
 \subsection*{Minimizing the posterior covariance of W (Gaussian)}
-For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\textbf{x}_{t}$ that maximizes the expected information gain about \textbf{W}. Equivalently, this would be selecting $\textbf{x}_{t}$ that minimizes the determinant of the covariance of \textbf{W} at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\textbf{W}^*$ in our formulation.
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\textbf{x}_{t}$ that maximizes the expected information gain about \textbf{W}. Equivalently, this would be selecting $\textbf{x}_{t}$ that minimizes the determinant of the covariance of \textbf{W} at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\textbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
 
 \begin{equation}
-    \lambda_t =\textbf{D}\textbf{W}\textbf{x}_t+\textbf{b}^{prestim}
+    \lambda_t =\textbf{D}\textbf{W}\textbf{x}_t+\textbf{b}^{prestim}_{t}
 \end{equation}
 
-Here, we are trying to find the optimal $\textbf{W}^*$, where $\lambda_t$, $\textbf{x}_t$, and $\textbf{b}^{prestim}$ are known.
+Here, we are trying to find the optimal $\textbf{W}^*$, where $\lambda_t$, $\textbf{x}_t$, and $\textbf{b}^{prestim}_{t}$ are known.
 \[
 \begin{aligned}
 \text{Let } & \Sigma_{t-1}
@@ -125,11 +125,11 @@ Since we minimize over $x_{t}$, the objective function is therefore:
 We can further expand out:
 \[
 \begin{aligned}
-    \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]=\hat{\textbf{D}}_{t-1}\hat{\textbf{W}}_{t-1}\textbf{x}_{t}+\textbf{b}^{prestim}
+    \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]=\hat{\textbf{D}}_{t-1}\hat{\textbf{W}}_{t-1}\textbf{x}_{t}+\textbf{b}_{t}^{prestim}
 \end{aligned}
 \]
 where $\hat{\textbf{D}}_{t-1}$ and $\hat{\textbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
-and $\textbf{b}^{prestim}$ is baseline firing rate identified from the prestim period.
+and $\textbf{b}_{t}^{prestim}$ is baseline firing rate identified from the prestim period.
 
 % Need to find the correct way to express how x affects the uncertainty of W
 % Then take the nuclear norm and then max min (E optimality)
@@ -251,6 +251,21 @@ and $\textbf{b}^{prestim}$ is baseline firing rate identified from the prestim p
 % \text{argmin}_{x \in \{0, 1\}}
 % -\log \det\bigl( \mathcal{I}_{1:t-1} + \mathcal{I}_t(x) \bigr)
 % \end{equation}
+
+\clearpage
+\section{Random Sampling Stopgap}
+
+\begin{itemize}
+    \item Total configurations: $N$
+    \item Take $N$ samples: stimulate groups of 2 sites (one row). 
+    \item For 128 sites, this is 64 rows. 
+    \item Each stim randomly sample 20\%: 12 rows (can revisit this number)
+    \item Collect all the data and responses and see if we can predict in a leave-one-out approach (use all but one response). 
+    \item Benefit of random sampling is that we can collect now before Nike's implant comes out.
+\end{itemize}
+
+
+
 
 
 \vspace{-1cm}

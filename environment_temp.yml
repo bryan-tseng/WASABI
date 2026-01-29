@@ -1,0 +1,30 @@
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+
+  # core numerics
+  - numpy<2
+  - scipy
+  # - pandas
+  # - scikit-learn
+  - matplotlib
+  # - pynwb
+
+  # misc
+  # - pyqt
+  # - openpyxl
+  # - ipykernel
+  # - opencv
+  # - ipywidgets
+
+  # torch + cuda (GPU build)
+  - pytorch=2.5.1
+  - pytorch-cuda=12.1
+  - torchvision
+  - spikeinterface
