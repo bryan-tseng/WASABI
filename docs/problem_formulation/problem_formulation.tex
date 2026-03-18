@@ -29,126 +29,258 @@
     \item If not linear, use NN or some other nonlinear approaches.
 \end{enumerate}
 We will focus on (2) first, with fixed continuous stimulation parameters (e.g., current, frequency, pulse width).
-\subsection*{Poisson MLE for rate estimation}
+
+\subsection*{Simplified formulation}
+\begin{align*}
+\mathbf{r} &\sim \mathrm{Poisson}(\boldsymbol{\lambda}) \\
+\boldsymbol{\lambda}^{\mathrm{stim}} &= \mathbf{WS} + \boldsymbol{\lambda}^{\mathrm{control}}
+\end{align*}
+\begin{align*}
+\mathbf{r} &:\ \text{Recorded responses (spikes)}\\
+\boldsymbol{\lambda}  &:\ \text{Firing rates} \\
+\mathbf{W} &:\ \text{Low rank mapping from stimulation channels to firing rates} \\
+\mathbf{S} &:\ \text{Selection of stimulation channels}
+\end{align*}
+
+\begin{itemize}
+\item $\mathbf{W}$ is unknown.
+\item At time t-1, we want to find $\mathbf{s}_t$ that maximizes the information about $\mathbf{W}$, given $\mathbf{r}_{1:t-1}$ and $\mathbf{s}_{1:t-1}$
+\end{itemize}
+
+\clearpage
+\subsection*{Ridge regression for learning W at time t}
+If we assume we know $D_t$ at time $t$, we estimate $\mathbf{W}_t$ using a ridge least-squares objective:
+\begin{align*}
+\hat{\mathbf{W}}_t &= \arg\min_{\mathbf{W}}
+||\mathbf{Z-WS}||_F^2 + \beta||\mathbf{W}||_F^2
+\end{align*}
+where $\beta$ is the weight of the ridge prior. We can expanding the Frobenius norm using trace:
+\begin{align*}
+\mathcal{L}(\hat{\mathbf{W}}_t) &= tr[(\mathbf{Z-WS})(\mathbf{Z-WS})^{\top}]+\beta \,tr(\mathbf{WW}^{\top})\\
+\mathcal{L}(\hat{\mathbf{W}}_t)&=tr(\mathbf{ZZ}^{\top})
+- 2\,tr(\mathbf{ZS^{\top}W^{\top}}) + tr(\mathbf{WSS^{\top}W^{\top}})
++ \beta \,tr(\mathbf{WW}^{\top})
+\end{align*}
+Keep terms relative to $\mathbf{W}_t$
+\begin{align*}
+\mathcal{L}(\hat{\mathbf{W}}_t)= -2\,\mathrm{tr}(\mathbf{ZS}^{\top}\mathbf{W}^{\top})
++ \mathrm{tr}(\mathbf{WSS^{\top}W^{\top}})
++ \beta \,\mathrm{tr}(\mathbf{WW}^{\top})
+\end{align*}
+Taking derivative and set to zero:
+
+\begin{align*}
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}} &= -2\,\mathbf{ZS}^{\top}
++ 2\,\mathbf{WSS}^{\top}
++ 2\beta\,\mathbf{W}\\
+0 &= -2\,\mathbf{ZS}^{\top} + 2\,\mathbf{WSS}^{\top}+ 2\beta\,\mathbf{W}\\
+\mathbf{WSS}^{\top} &+ \beta \mathbf{W} = \mathbf{ZS}^{\top}\\
+\mathbf{W}(\mathbf{SS}^{\top} &+ \beta \mathbf{I}) = \mathbf{ZS}^{\top}
+\end{align*}
+\begin{align*}
+\boxed{\mathbf{W}=\mathbf{ZS}^{\top}(\mathbf{SS}^{\top}+\beta \mathbf{I})^{-1}}
+\end{align*}
+
+\subsection*{Generative model for perturbation}
+\begin{align*}
+(\boldsymbol{\lambda}_{\text{stim}}-\boldsymbol{\lambda}_{\text{control}})=\mathbf{D}(\mathbf{WS}+\boldsymbol{\xi})+\boldsymbol{\eta}
+\end{align*}
+Note:
+\begin{itemize}
+\item Current loss is written for estimating $\mathbf{W}_t$
+\item $\mathbf{D}$ - learned from control? or learn jointly with trials t (Alternateing or SVD)?
+\item $\boldsymbol{\xi}_t$ is perturbation noise (mismatch between intended and actual stim-latent effects) - hyperparameter, match data?
+\item $\boldsymbol{\eta}$: observation noise - hyperparameter, match data?
+\item Columns of $\mathbf{W}$ have unit variance
+\item Ridge prior should scale as $\beta \propto \frac{1}{n}$ so in low-trial regime solution is not degenerate and high trial regime data info is respected.
+\end{itemize}
+
+\clearpage
+\subsection*{Low-rank formulation}
+Let $\mathbf{\Delta}=\boldsymbol{\lambda}^{\mathrm{stim}}-\boldsymbol{\lambda}^{\mathrm{control}}$ be the perturbation on the firing rate.
+
+
+We estimate a low-rank mapping (\textbf{W}) between stimulation and perturbation
+
+\begin{align*}
+    \hat{\mathbf{W}}_t=\arg\min_{\mathbf{W}}\|\mathbf{\Delta}_{1:t}-(\mathbf{W})\mathbf{S}_{1:t}\|_F^2+\tau \|\mathbf{W}\|_*
+\end{align*}
+
+where
+\begin{itemize}
+    \item $\mathbf{\Delta}_{1:t}$ is the matrix of perturbations up to time $t$
+    \item $\mathbf{S}_{1:t}$ is the matrix of stimulation patterns up to time $t$
+    \item $\mathbf{W}$ is the low-rank mapping from stimulation to perturbation
+    \item $\tau$ is the weight (hyperparameters) that controls the strength of the low-rank penalties
+    \item $\|\mathbf{W}\|_*$ is the nuclear norm (sum of singular values) that promotes low rank in $\mathbf{W}$
+\end{itemize}
+
+\clearpage
+\subsection*{Low-rank + sparse formulation}
+Let $\mathbf{\Delta}=\boldsymbol{\lambda}^{\mathrm{stim}}-\boldsymbol{\lambda}^{\mathrm{control}}$ be the perturbation on the firing rate.
+
+
+We estimate a low-rank mapping (\textbf{W}) between stimulation and perturbation
+
+\begin{align*}
+    \hat{\mathbf{W}}_t,\;\hat{\mathbf{E}}_{1:t}=\arg\min_{\mathbf{W},\,\mathbf{E}}\|\mathbf{\Delta}_{1:t}-(\mathbf{W}+\mathbf{E})\mathbf{S}_{1:t}\|_F^2+\tau \|\mathbf{W}\|_*+\lambda \|\mathbf{E}\|_1
+\end{align*}
+
+where
+\begin{itemize}
+    \item $\mathbf{\Delta}_{1:t}$ is the matrix of perturbations up to time $t$
+    \item $\mathbf{S}_{1:t}$ is the matrix of stimulation patterns up to time $t$
+    \item $\mathbf{W}$ is the low-rank mapping from stimulation to perturbation
+    \item $\mathbf{E}$ is the direct channel-to-channel effects
+    \item $\tau$ and $\lambda$ are weights (hyperparameters) that control the strength of the low-rank and sparse penalties
+    \item $\|\mathbf{W}\|_*$ is the nuclear norm (sum of singular values) that promotes low rank in $\mathbf{W}$
+    \item $\|\mathbf{E}\|_1$ is the L1 norm that promotes sparsity in $\mathbf{E}$
+\end{itemize}
+
+\clearpage
+\subsection*{Dynamics model}
+
+Instead of assuming an instantaneous mapping $\mathbf{DWs}_t$, we model stimulation as a perturbation to a latent dynamical system.
+\paragraph{State equation}
+\begin{align*}
+    \mathbf{z}_t^{\mathrm{control}}&=\mathbf{A}\mathbf{z}_{t-1}^{\mathrm{control}} + \boldsymbol{\epsilon}_t\\
+    \mathbf{z}_t&=\mathbf{W}\mathbf{s}_t + \mathbf{z}_t^{\mathrm{control}} + \boldsymbol{\xi}_t\\
+    \boldsymbol{\lambda}_t^{\mathrm{stim}}&=\mathbf{Dz}_t + \boldsymbol{\eta}_t
+\end{align*}
+where:
+\begin{itemize}
+    \item $\mathbf{A}\in\mathbb{R}^{K\times K}$ Dynamics operator - learned timepoints other than stim timepoints?
+    \item $\mathbf{W}\in\mathbb{R}^{K\times N}$ Low rank mapping (stim-latents)
+    \item $\mathbf{D}\in\mathbb{R}^{M\times K}$ Observation operator
+    \item $\boldsymbol{\epsilon}_t$ is latent process noise
+    \item $\boldsymbol{\xi}_t$ is perturbation noise (e.g.\ mismatch between intended and actual stim-response effects)
+    \item $\boldsymbol{\eta}_t$ is observation noise
+    \item $K << M, N$ (low rank assumption)
+\end{itemize}
+
+\paragraph{Poisson observation model}
+\begin{align*}
+\mathbf{r}_t \mid \boldsymbol{\lambda}_t
+&\sim \mathrm{Poisson}(\boldsymbol{\lambda}_t)
+\end{align*}
+Nonnegativity with a link function, e.g.\ $\boldsymbol{\lambda}_t=\mathrm{softplus}(\mathbf{D}\mathbf{z}_t+\boldsymbol{\lambda}_t^{\mathrm{control}})$
+\paragraph{Notes}
+% \begin{itemize}
+%     \item $\mathbf{D}$ can be learned from control data (e.g.\ PCA/FA on control activity) or jointly with $\mathbf{A},\mathbf{W}$ using alternating optimization / EM-like procedures.
+%     % \item \textbf{Trial vs time bin.} Here $t$ can index trials, or within-trial time bins. If within-trial, $\boldsymbol{\lambda}_t^{\mathrm{control}}$ may become a time-varying baseline.
+%     \item \textbf{Stability.} For a dynamical latent model, one can enforce stability constraints on $\mathbf{A}$ (e.g.\ spectral radius $<1$) if $t$ indexes time bins.
+% \end{itemize}
+
+
+\clearpage
+\subsection*{Minimizing the posterior covariance of W (Gaussian)}
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\mathbf{s}_{t}$ that maximizes the expected information gain about $\mathbf{W}$. Equivalently, this would be selecting $\mathbf{s}_{t}$ that minimizes the determinant of the covariance of $\mathbf{W}$ at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\mathbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
+
+\begin{equation}
+    \boldsymbol{\lambda}_t =\mathbf{DWs}_t+\boldsymbol{\lambda}^{control}_{t}
+\end{equation}
+
+Here, we are trying to find the optimal $\mathbf{W}^*$, where $\boldsymbol{\lambda}$, $\mathbf{s}_t$, and $\boldsymbol{\lambda}^{control}_{t}$ are known.
+\begin{align*}
+    \text{Let } & \Sigma_{t-1}
+    && \text{be the covariance matrix of $\mathbf{W}$ before trial $t-1$}\\
+    \text{Let } & \beta
+    && \text{be how we scale our data relative to our prior (could be $1/n$)}
+\end{align*}
+
+In terms of precision, we can formulate the Gaussian case as:
+\begin{equation}
+    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T
+\end{equation}
+
+Take the determinant
 \[
-\begin{aligned}
-\text{Let } & x_i \in \{0,1\} 
+    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T)
+\]
+
+using the matrix inversion lemma:
+\[
+    \text{det}(\mathbf{A} + \mathbf{uv}^T) = (1 + \mathbf{v}^T\mathbf{A}^{-1}\mathbf{u})\text{det}(\mathbf{A})
+\]
+\[
+    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T \Sigma_{t-1} \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}])\det(\Sigma_{t-1}^{-1})
+\]
+
+Since we minimize over $\mathbf{s}_{t}$, the objective function is therefore:
+\begin{align*}
+    \arg\max_{\mathbf{s}}\; \det\big(\Sigma_{t}^{-1}\big)
+    &= \arg\max_{\mathbf{s}}\;  \big(1+ \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
+    &= \arg\max_{\mathbf{s}}\; \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]
+\end{align*}
+
+We can further expand out:
+\begin{align*}
+    \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]=\hat{\mathbf{D}}_{t-1}\hat{\mathbf{W}}_{t-1}\mathbf{s}_{t}+\boldsymbol{\lambda}_{t}^{control}
+\end{align*}
+where $\hat{\mathbf{D}}_{t-1}$ and $\hat{\mathbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
+and $\boldsymbol{\lambda}_{t}^{control}$ is firing rate identified from control reaches.
+
+% Need to find the correct way to express how s affects the uncertainty of W
+% Then take the nuclear norm and then max min (E optimality)
+% max min singular value of precision 
+
+\clearpage
+\subsection*{Poisson MLE for rate estimation}
+\begin{align*}
+\text{Let } & s_i \in \{0,1\} 
 && \text{be the selection of stimulation channels } i,
 \quad i = 1,\ldots,N \\
 \text{Let } & r \in \mathbb{R}^M
 && \text{be the recorded response from } M \text{ recording channels}
-\end{aligned}
-\]
+\end{align*}
+
 We assume a linear-Poisson model where the response is generated as:
-\[
-\begin{aligned}
+\begin{align*}
 r_j &\sim \text{Poisson}(\lambda_j), \text{where } \lambda_j 
-= \sum_{k=1}^K D_{jk}\, z_k + b_j^{prestim} \\
+= \sum_{k=1}^K D_{jk}\, z_k + \lambda_j^{control} \\
 \lambda_{j}  &:\ \text{firing rate of channel j} \\
 D_{jk} &:\ \text{weight from latent variable } k \text{ to recording channel } j \\
 z_{k}  &:\ \text{latent variable k (Assumes rate to stim-channel relationship is low-rank)} \\
 K      &:\ \text{total number of latent variables} \\
-b_j^{prestim}    &:\ \text{baseline firing rate of recording channel } j \text{ identified from the prestim period}
-\end{aligned}
-\]
+\lambda_j^{control}    &:\ \text{firing rate of recording channel } j \text{ identified from control reaches}
+\end{align*}
 
-We further define the matrix $W = [w_{ki}]$ which identifies the mapping from the stimulation pattern $x_{i}$ to latent variable $z_{k}$
-\[
-\begin{aligned}
-z_k =  \sum_{i=1}^NW_{ki}\, x_i\\
-\end{aligned}
-\]
+We further define the matrix $W = [w_{ki}]$ which identifies the mapping from the stimulation pattern $s_{i}$ to latent variable $z_{k}$
 
-Given a set of stimulation patterns and recorded responses $\{(x_t, r_t)\}_{t=1}^T$, where $T$ is the number of trials. The Poisson likelihood is
+\begin{align*}
+z_k =  \sum_{i=1}^N W_{ki}\, s_i\\
+\end{align*}
+
+Given a set of stimulation patterns and recorded responses $\{(\mathbf{s}_t, \mathbf{r}_t)\}_{t=1}^T$, where $T$ is the number of trials. The Poisson likelihood is
 \begin{equation}
     \mathcal{L}(r; \lambda) = \prod_{t=1}^T \prod_{j=1}^M \frac{e^{-\lambda_{j, t}} (\lambda_{j, t})^{r_{j, t}}}{r_{j, t}!}
 \end{equation}
 
 {\centering 
-where $\lambda_j = \sum_{i=1}^K D_{ji} W_{ki}x_i + b_j^{prestim}$\par}
+where $\lambda_{j,t} = \sum_{k=1}^K \sum_{i=1}^N D_{jk}\, W_{ki}\, s_{i,t} + \lambda_{j,t}^{control}$\par}
 This gives the log-likelihood:
 \begin{equation}
-    \log \mathcal{L}(r; \lambda) = \sum_{t=1}^T \sum_{j=1}^M \left( -\lambda_j + r_j \log \lambda_j - \log r_j! \right)
+    \log \mathcal{L}(r; \lambda) = \sum_{t=1}^T \sum_{j=1}^M ( -\lambda_{j,t} + r_{j,t} \log \lambda_{j,t} - \log (r_{j,t}!))
 \end{equation}
 Constraints:
 \begin{itemize}
     \item $\lambda_{j} \geq 0$ (non-negative firing rate) or just use softplus link function, which cancels out with log?
-    \item $b_{j} \geq 0$ (non-negative baseline firing rate)
+    \item $\lambda_{j} \geq 0$ (non-negative control firing rate)
 \end{itemize}
 
-\newpage
-
-\subsection*{Minimizing the posterior covariance of W (Gaussian)}
-For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\textbf{x}_{t}$ that maximizes the expected information gain about \textbf{W}. Equivalently, this would be selecting $\textbf{x}_{t}$ that minimizes the determinant of the covariance of \textbf{W} at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\textbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
-
-\begin{equation}
-    \lambda_t =\textbf{D}\textbf{W}\textbf{x}_t+\textbf{b}^{prestim}_{t}
-\end{equation}
-
-Here, we are trying to find the optimal $\textbf{W}^*$, where $\lambda_t$, $\textbf{x}_t$, and $\textbf{b}^{prestim}_{t}$ are known.
-\[
-\begin{aligned}
-\text{Let } & \Sigma_{t-1}
-&& \text{be the covariance matrix of \textbf{W} before trial $t-1$}\\
-\text{Let } & \beta
-&& \text{be how we scale our data relative to our prior (could be $1/n$)}
-\end{aligned}
-\]
-
-In terms of precision, we can formulate the Gaussian case as:
-\begin{equation}
-    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T
-\end{equation}
-
-Take the determinant
-\[
-    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T)
-\]
-
-using the matrix inversion lemma:
-\[
-    \text{det}(\textbf{A} + \textbf{u}\textbf{v}^T) = (1 + \textbf{v}^T\textbf{A}^{-1}\textbf{u})\text{det}(\textbf{A})
-\]
-\[
-    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}] \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^T \Sigma_{t-1} \mathbb{E}[\lambda_t\mid \textbf{x}_{t}])\det(\Sigma_{t-1}^{-1})
-\]
-
-Since we minimize over $x_{t}$, the objective function is therefore:
-\[
-\begin{aligned}
-    \arg\max_{x}\; \det\big(\Sigma_{t}^{-1}\big)
-    &= \arg\max_{x}\;  \big(1+ \beta \,\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
-    &= \arg\max_{x}\; \beta \,\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\lambda_t\mid \textbf{x}_{t}]
-\end{aligned}
-\]
-
-We can further expand out:
-\[
-\begin{aligned}
-    \mathbb{E}[\lambda_t\mid \textbf{x}_{t}]=\hat{\textbf{D}}_{t-1}\hat{\textbf{W}}_{t-1}\textbf{x}_{t}+\textbf{b}_{t}^{prestim}
-\end{aligned}
-\]
-where $\hat{\textbf{D}}_{t-1}$ and $\hat{\textbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
-and $\textbf{b}_{t}^{prestim}$ is baseline firing rate identified from the prestim period.
-
-% Need to find the correct way to express how x affects the uncertainty of W
-% Then take the nuclear norm and then max min (E optimality)
-% max min singular value of precision 
-
-
+\clearpage
 \subsection*{TODO}
 \begin{itemize}
-    \item Since x is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\textbf{x}$
-    \item Try to find closed form after plugging in E[$\lambda$]?
+    \item Since s is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\mathbf{s}$
+    \item Try to find closed form after plugging in E[$\boldsymbol{\lambda} $]?
     \item Forgot to index via trial in Poisson MLE section?
     \item Projected is projecting the final to discrete, proximal is projecting each step
-    \item Softplus as a rectifier for $\lambda$
-    \item Combine Poisson MLE rate estimation and optimization of x into an algorithm
+    \item Softplus as a rectifier for $\boldsymbol{\lambda} $
+    \item Combine Poisson MLE rate estimation and optimization of s into an algorithm
     % \item Also need to add "state" about movement vs at rest
+    \item Need to check $\mathbf{DW}$ is low rank in real data
+    \item Simulate the Linear-Poisson model to make sure statistics align
 \end{itemize}
-
-
-
 
 % \begin{SCfigure}[1][h!]
 %     \includegraphics[width=0.4\textwidth]{fig1.png}
@@ -170,8 +302,8 @@ and $\textbf{b}_{t}^{prestim}$ is baseline firing rate identified from the prest
 % The latent variables are $z_{k} = W_{ki}x_{i}$, and the mean firing rate at recording channel $j$ is:
 % \[
 % \lambda_j(\theta)
-% = \sum_{k=1}^K D_{jk} z_k + b_j
-% = \sum_{k=1}^K \sum_{i=1}^N D_{jk} W_{ki} x_i + b_j
+% = \sum_{k=1}^K D_{jk} z_k + \lambda_j^{control}
+% = \sum_{k=1}^K \sum_{i=1}^N D_{jk} W_{ki} x_i + \lambda_j^{control}
 % \]
 
 % \subsection*{Score function}
@@ -253,7 +385,7 @@ and $\textbf{b}_{t}^{prestim}$ is baseline firing rate identified from the prest
 % \end{equation}
 
 \clearpage
-\section{Random Sampling Stopgap}
+\section*{Random Sampling Stopgap}
 
 \begin{itemize}
     \item Total configurations: $N$
