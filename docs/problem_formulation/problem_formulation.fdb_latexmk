@@ -1,8 +1,8 @@
 # Fdb version 3
-["pdflatex"] 1772820553 "/home/bryan/Documents/workspace/WASABI/docs/problem_formulation/problem_formulation.tex" "problem_formulation.pdf" "problem_formulation" 1772820553
+["pdflatex"] 1777344406 "/home/bryan/Documents/workspace/WASABI/docs/problem_formulation/problem_formulation.tex" "problem_formulation.pdf" "problem_formulation" 1777344406
   "/etc/texmf/web2c/texmf.cnf" 1771626387 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/home/bryan/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1095.600pk" 1771626509 12644 4a037de32a5923751f4f72237f268787 ""
-  "/home/bryan/Documents/workspace/WASABI/docs/problem_formulation/problem_formulation.tex" 1772820553 18204 176d9da44be6fb986d3e19183e11ebb6 ""
+  "/home/bryan/Documents/workspace/WASABI/docs/problem_formulation/problem_formulation.tex" 1777344396 19843 1f28739bafaa56d5e74defa4e282cbb8 ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/tcrm1095.tfm" 1136768653 1536 02c06700a42be0f5a28664c7273f82e7 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmbsy5.tfm" 1246382020 1120 1e8878807317373affa7f7bba4cf2f6a ""
@@ -52,6 +52,7 @@
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb" 1248133631 32726 0a1aea6fcd6468ee2cf64d891f5c43c8 ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1248133631 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb" 1248133631 32626 4f5c1b83753b1dd3a97d1b399a005b4b ""
+  "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib8.pfb" 1248133631 35479 892d27442ef9ef29ce1ee57aa0e8a665 ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb" 1248133631 34694 ad62b13721ee8eda1dcc8993c8bd7041 ""
   "/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii" 1461363279 71627 94eb9990bed73c364d7f53f960cc8c5b ""
   "/usr/share/texlive/texmf-dist/tex/generic/atbegshi/atbegshi.sty" 1575674566 24708 5584a51a7101caf7e6bbf1fc27d8f7b1 ""
@@ -127,9 +128,9 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1644012257 39432 7155514e09a3d69036fac785183a21c2 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1771626497 165012 f177baa1c39a3ebd62c3096a43521a0d ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1771626501 1435947 c59d9c64ae13064c614263a53c58ae48 ""
-  "problem_formulation.aux" 1772820553 988 293ee66341d5febf83a0f8b9c3d42f41 "pdflatex"
-  "problem_formulation.out" 1772820553 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "problem_formulation.tex" 1772820553 18204 176d9da44be6fb986d3e19183e11ebb6 ""
+  "problem_formulation.aux" 1777344406 1228 5905a6ca090c4a4f569394064f2f12a2 "pdflatex"
+  "problem_formulation.out" 1777344406 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "problem_formulation.tex" 1777344396 19843 1f28739bafaa56d5e74defa4e282cbb8 ""
   (generated)
   "problem_formulation.aux"
   "problem_formulation.log"

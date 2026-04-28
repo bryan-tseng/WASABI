@@ -33,13 +33,16 @@ We will focus on (2) first, with fixed continuous stimulation parameters (e.g., 
 \subsection*{Simplified formulation}
 \begin{align*}
 \mathbf{r} &\sim \mathrm{Poisson}(\boldsymbol{\lambda}) \\
-\boldsymbol{\lambda}^{\mathrm{stim}} &= \mathbf{WS} + \boldsymbol{\lambda}^{\mathrm{control}}
+\boldsymbol{\lambda}^{\mathrm{stim}} &= \mathbf{Cs} + \boldsymbol{\lambda}^{\mathrm{control}} \\
+\mathbf{C} &= \mathbf{DW}_{\text{low-rank}}
 \end{align*}
 \begin{align*}
 \mathbf{r} &:\ \text{Recorded responses (spikes)}\\
 \boldsymbol{\lambda}  &:\ \text{Firing rates} \\
-\mathbf{W} &:\ \text{Low rank mapping from stimulation channels to firing rates} \\
-\mathbf{S} &:\ \text{Selection of stimulation channels}
+\mathbf{C} &:\ \text{Mapping from stimulation channels to firing rates} \\
+\mathbf{s} &:\ \text{Selection of stimulation channels}\\
+\mathbf{D} &:\ \text{Mapping from latent variables to recorded responses} \\
+\mathbf{W}_{\text{low-rank}} &:\ \text{Low rank mapping from stimulation channels to latent variables}
 \end{align*}
 
 \begin{itemize}
@@ -89,87 +92,119 @@ Note:
 \begin{itemize}
 \item Current loss is written for estimating $\mathbf{W}_t$
 \item $\mathbf{D}$ - learned from control? or learn jointly with trials t (Alternateing or SVD)?
-\item $\boldsymbol{\xi}_t$ is perturbation noise (mismatch between intended and actual stim-latent effects) - hyperparameter, match data?
+\item $\boldsymbol{\xi}_t$ is perturbation noise (e.g.\ mismatch between intended and actual stim-response effects) - hyperparameter, match data?
 \item $\boldsymbol{\eta}$: observation noise - hyperparameter, match data?
 \item Columns of $\mathbf{W}$ have unit variance
 \item Ridge prior should scale as $\beta \propto \frac{1}{n}$ so in low-trial regime solution is not degenerate and high trial regime data info is respected.
 \end{itemize}
 
 \clearpage
-\subsection*{Low-rank formulation}
-Let $\mathbf{\Delta}=\boldsymbol{\lambda}^{\mathrm{stim}}-\boldsymbol{\lambda}^{\mathrm{control}}$ be the perturbation on the firing rate.
-
-
-We estimate a low-rank mapping (\textbf{W}) between stimulation and perturbation
-
-\begin{align*}
-    \hat{\mathbf{W}}_t=\arg\min_{\mathbf{W}}\|\mathbf{\Delta}_{1:t}-(\mathbf{W})\mathbf{S}_{1:t}\|_F^2+\tau \|\mathbf{W}\|_*
-\end{align*}
-
-where
-\begin{itemize}
-    \item $\mathbf{\Delta}_{1:t}$ is the matrix of perturbations up to time $t$
-    \item $\mathbf{S}_{1:t}$ is the matrix of stimulation patterns up to time $t$
-    \item $\mathbf{W}$ is the low-rank mapping from stimulation to perturbation
-    \item $\tau$ is the weight (hyperparameters) that controls the strength of the low-rank penalties
-    \item $\|\mathbf{W}\|_*$ is the nuclear norm (sum of singular values) that promotes low rank in $\mathbf{W}$
-\end{itemize}
-
-\clearpage
-\subsection*{Low-rank + sparse formulation}
-Let $\mathbf{\Delta}=\boldsymbol{\lambda}^{\mathrm{stim}}-\boldsymbol{\lambda}^{\mathrm{control}}$ be the perturbation on the firing rate.
-
-
-We estimate a low-rank mapping (\textbf{W}) between stimulation and perturbation
-
-\begin{align*}
-    \hat{\mathbf{W}}_t,\;\hat{\mathbf{E}}_{1:t}=\arg\min_{\mathbf{W},\,\mathbf{E}}\|\mathbf{\Delta}_{1:t}-(\mathbf{W}+\mathbf{E})\mathbf{S}_{1:t}\|_F^2+\tau \|\mathbf{W}\|_*+\lambda \|\mathbf{E}\|_1
-\end{align*}
-
-where
-\begin{itemize}
-    \item $\mathbf{\Delta}_{1:t}$ is the matrix of perturbations up to time $t$
-    \item $\mathbf{S}_{1:t}$ is the matrix of stimulation patterns up to time $t$
-    \item $\mathbf{W}$ is the low-rank mapping from stimulation to perturbation
-    \item $\mathbf{E}$ is the direct channel-to-channel effects
-    \item $\tau$ and $\lambda$ are weights (hyperparameters) that control the strength of the low-rank and sparse penalties
-    \item $\|\mathbf{W}\|_*$ is the nuclear norm (sum of singular values) that promotes low rank in $\mathbf{W}$
-    \item $\|\mathbf{E}\|_1$ is the L1 norm that promotes sparsity in $\mathbf{E}$
-\end{itemize}
-
-\clearpage
 \subsection*{Dynamics model}
 
-Instead of assuming an instantaneous mapping $\mathbf{DWs}_t$, we model stimulation as a perturbation to a latent dynamical system.
+Instead of assuming an instantaneous mapping $\mathbf{W}$, we model stimulation as a perturbation to a latent dynamical system through the mapping $\mathbf{B}$. We can also just combine rate estimation with the observation equation (also dimensionality reduction)
 \paragraph{State equation}
 \begin{align*}
-    \mathbf{z}_t^{\mathrm{control}}&=\mathbf{A}\mathbf{z}_{t-1}^{\mathrm{control}} + \boldsymbol{\epsilon}_t\\
-    \mathbf{z}_t&=\mathbf{W}\mathbf{s}_t + \mathbf{z}_t^{\mathrm{control}} + \boldsymbol{\xi}_t\\
-    \boldsymbol{\lambda}_t^{\mathrm{stim}}&=\mathbf{Dz}_t + \boldsymbol{\eta}_t
+    \mathbf{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
+    \mathbf{x}_t &= \mathbf{A}\mathbf{x}_{t-1} + \mathbf{B}\mathbf{s}_t + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}) \\
+    \mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d} + \mathbf{D}\mathbf{s}_t\right)\right)
 \end{align*}
 where:
 \begin{itemize}
-    \item $\mathbf{A}\in\mathbb{R}^{K\times K}$ Dynamics operator - learned timepoints other than stim timepoints?
-    \item $\mathbf{W}\in\mathbb{R}^{K\times N}$ Low rank mapping (stim-latents)
-    \item $\mathbf{D}\in\mathbb{R}^{M\times K}$ Observation operator
-    \item $\boldsymbol{\epsilon}_t$ is latent process noise
-    \item $\boldsymbol{\xi}_t$ is perturbation noise (e.g.\ mismatch between intended and actual stim-response effects)
-    \item $\boldsymbol{\eta}_t$ is observation noise
-    \item $K << M, N$ (low rank assumption)
+    \item $\mathbf{A}\in\mathbb{R}^{K\times K}$ Dynamics operator
+    \item $\mathbf{B}\in\mathbb{R}^{K\times N}$: Stimulus-to-latent mapping
+    \item $\mathbf{C}\in\mathbb{R}^{N\times K}$: Observation (loading) matrix
+    \item $\mathbf{D}\in\mathbb{R}^{N\times N}$: Direct ch-to-ch effect that is a diagonal matrix (TODO Might need a kernel for delayed effects)
+    \item $\mathbf{d}\in\mathbb{R}^{N}$: per-channel mean log firing rate
+    \item $\mathbf{Q}\in\mathbb{R}^{K\times K}$: latent process noise covariance
+    \item $\mathbf{s}_t\in\mathbb{R}^{N}$: stimulus input at time $t$ (Control trials just have $\vec{\mathbf{0}}$)
+    \item $\mathbf{y}_t\in\mathbb{R}^{N}$: binned spike counts
+    \item $K \ll N$ (low-rank assumption)
 \end{itemize}
-
-\paragraph{Poisson observation model}
+% State space equations
+% Dimensions
+% A: 15 \times 15
+% B: 15 \times 8
+% C: 128 \times 15
+% D: 128 \times 29
+\clearpage
+\subsection*{Fitting using EKF-style integral and SGD (Ignore Ds for now)}
+The marginal likelihood is:
 \begin{align*}
-\mathbf{r}_t \mid \boldsymbol{\lambda}_t
-&\sim \mathrm{Poisson}(\boldsymbol{\lambda}_t)
+    \log p(\mathbf{y}_{1:t};\boldsymbol{\theta})
+        &= \log \int p(\mathbf{y}_{1:t} \mid \mathbf{x}_{1:t};\boldsymbol{\theta})\,
+                       p(\mathbf{x}_{1:t};\boldsymbol{\theta})\, d\mathbf{x}_{1:t}\\
+\mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d} + \mathbf{D}\mathbf{s}_t\right)\right)\\
+\boldsymbol{\theta} &= \{\mathbf{A},\, \mathbf{C},\, \mathbf{d},\, \boldsymbol{\mu}_0,\, \boldsymbol{\Sigma}_0\}
 \end{align*}
-Nonnegativity with a link function, e.g.\ $\boldsymbol{\lambda}_t=\mathrm{softplus}(\mathbf{D}\mathbf{z}_t+\boldsymbol{\lambda}_t^{\mathrm{control}})$
-\paragraph{Notes}
-% \begin{itemize}
-%     \item $\mathbf{D}$ can be learned from control data (e.g.\ PCA/FA on control activity) or jointly with $\mathbf{A},\mathbf{W}$ using alternating optimization / EM-like procedures.
-%     % \item \textbf{Trial vs time bin.} Here $t$ can index trials, or within-trial time bins. If within-trial, $\boldsymbol{\lambda}_t^{\mathrm{control}}$ may become a time-varying baseline.
-%     \item \textbf{Stability.} For a dynamical latent model, one can enforce stability constraints on $\mathbf{A}$ (e.g.\ spectral radius $<1$) if $t$ indexes time bins.
-% \end{itemize}
+
+Because the Poisson emission $p(\mathbf{y}_{1:T} \mid \mathbf{x}_{1:T};\boldsymbol{\theta})$
+is non-Gaussian, the integral is intractable. Need to approximate it by linearizing
+the emission around $\hat{\mathbf{x}}_t$, the current filtered mean (latent states), yielding a Gaussian approximation to the predictive distribution
+\begin{align*}
+p(\mathbf{y}_t \mid \mathbf{y}_{1:t-1};\boldsymbol{\theta})
+\approx \mathcal{N}(\boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
+\end{align*}
+
+where
+\begin{align*}
+\boldsymbol{\lambda}_{t|t-1} = \text{softplus}\!\left(\mathbf{C}\hat{\mathbf{x}}_{t|t-1} + \mathbf{d}\right)
+\end{align*}
+and $\mathbf{S}_t$ is the estimated covariance.
+
+This gives the approximate marginal likelihood
+\begin{align}
+    \mathcal{L}(\boldsymbol{\theta})
+        \approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
+                \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
+\end{align}
+which we maximize directly via SGD.
+
+\paragraph{Emission Jacobian}
+Let $\boldsymbol{\lambda}_t = \text{softplus}(\mathbf{C}\hat{\mathbf{x}}_t + \mathbf{d})$.
+The Jacobian of the log-rate with respect to the latent state is:
+\begin{align}
+    \mathbf{H}_t &= \frac{\partial \boldsymbol{\lambda}_t}{\partial \mathbf{x}_t}\Bigg|_{\hat{\mathbf{x}}_t}
+                 = \text{diag}(\sigma(\mathbf{C}\hat{\mathbf{x}}_t + \mathbf{d}))\,\mathbf{C}
+                 \in \mathbb{R}^{N \times K}
+\end{align}
+where $\sigma(\cdot)$ is the sigmoid (derivative of softplus).
+
+\paragraph{EKF forward pass (predict--update)}
+For $t = 1, \dots, T$:
+\begin{align}
+    \hat{\mathbf{x}}_{t|t-1} &= \mathbf{A}\hat{\mathbf{x}}_{t-1|t-1} + \mathbf{B}\mathbf{s}_t \\
+    \mathbf{P}_{t|t-1}       &= \mathbf{A}\mathbf{P}_{t-1|t-1}\mathbf{A}^\top + \mathbf{Q} \\
+    \mathbf{S}_t             &= \mathbf{H}_t \mathbf{P}_{t|t-1} \mathbf{H}_t^\top
+                                + \text{diag}(\boldsymbol{\lambda}_{t|t-1})^{-1} \\
+    \mathbf{K}_t             &= \mathbf{P}_{t|t-1}\mathbf{H}_t^\top \mathbf{S}_t^{-1} \\
+    \hat{\mathbf{x}}_{t|t}   &= \hat{\mathbf{x}}_{t|t-1}
+                                + \mathbf{K}_t(\mathbf{y}_t - \boldsymbol{\lambda}_{t|t-1}) \\
+    \mathbf{P}_{t|t}         &= (\mathbf{I} - \mathbf{K}_t \mathbf{H}_t)\mathbf{P}_{t|t-1}
+\end{align}
+
+\paragraph{EKF marginal log-likelihood}
+The Gaussian approximation yields the tractable objective:
+\begin{align}
+    \mathcal{L}(\boldsymbol{\theta})
+        &\approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
+                 \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
+\end{align}
+
+\paragraph{SGD parameter update}
+Parameters are updated by differentiating through the EKF pass:
+\begin{align}
+    \boldsymbol{\theta}^{(\tau+1)}
+        &= \boldsymbol{\theta}^{(\tau)}
+           - \eta_\tau \,\nabla_{\boldsymbol{\theta}}\,
+             \bigl[-\mathcal{L}(\boldsymbol{\theta}^{(\tau)})\bigr]
+\end{align}
+where $\eta_\tau$ is the learning rate at step $\tau$ and gradients are
+computed via automatic differentiation (JAX) through the unrolled filter.
+The full parameter set is:
+\begin{align}
+    \boldsymbol{\theta} &= \{\mathbf{A},\,\mathbf{B},\,\mathbf{C},\,
+                             \mathbf{d},\,\mathbf{Q},\,\boldsymbol{\mu}_0,\,\boldsymbol{\Sigma}_0\}
+\end{align}
 
 
 \clearpage
