@@ -133,8 +133,8 @@ The marginal likelihood is:
     \log p(\mathbf{y}_{1:t};\boldsymbol{\theta})
         &= \log \int p(\mathbf{y}_{1:t} \mid \mathbf{x}_{1:t};\boldsymbol{\theta})\,
                        p(\mathbf{x}_{1:t};\boldsymbol{\theta})\, d\mathbf{x}_{1:t}\\
-\mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d} + \mathbf{D}\mathbf{s}_t\right)\right)\\
-\boldsymbol{\theta} &= \{\mathbf{A},\, \mathbf{C},\, \mathbf{d},\, \boldsymbol{\mu}_0,\, \boldsymbol{\Sigma}_0\}
+\mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d}\right)\right)\\
+\boldsymbol{\theta} &= \{\mathbf{A, B, C, d, \mu_0, \Sigma_0}\}
 \end{align*}
 
 Because the Poisson emission $p(\mathbf{y}_{1:T} \mid \mathbf{x}_{1:T};\boldsymbol{\theta})$
@@ -149,29 +149,30 @@ where
 \begin{align*}
 \boldsymbol{\lambda}_{t|t-1} = \text{softplus}\!\left(\mathbf{C}\hat{\mathbf{x}}_{t|t-1} + \mathbf{d}\right)
 \end{align*}
+
 and $\mathbf{S}_t$ is the estimated covariance.
 
 This gives the approximate marginal likelihood
-\begin{align}
+\begin{align*}
     \mathcal{L}(\boldsymbol{\theta})
         \approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
                 \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
-\end{align}
-which we maximize directly via SGD.
+\end{align*}
+
+which we can maximize directly via SGD.
 
 \paragraph{Emission Jacobian}
-Let $\boldsymbol{\lambda}_t = \text{softplus}(\mathbf{C}\hat{\mathbf{x}}_t + \mathbf{d})$.
-The Jacobian of the log-rate with respect to the latent state is:
-\begin{align}
+For $\boldsymbol{\lambda}_t = \text{softplus}(\mathbf{C}\hat{\mathbf{x}}_t + \mathbf{d})$, we have the Jacobian (log-rate with respect to the latent state) is:
+\begin{align*}
     \mathbf{H}_t &= \frac{\partial \boldsymbol{\lambda}_t}{\partial \mathbf{x}_t}\Bigg|_{\hat{\mathbf{x}}_t}
                  = \text{diag}(\sigma(\mathbf{C}\hat{\mathbf{x}}_t + \mathbf{d}))\,\mathbf{C}
                  \in \mathbb{R}^{N \times K}
-\end{align}
-where $\sigma(\cdot)$ is the sigmoid (derivative of softplus).
-
-\paragraph{EKF forward pass (predict--update)}
-For $t = 1, \dots, T$:
-\begin{align}
+\end{align*}
+where $\sigma(\cdot)$ is the sigmoid function (derivative of softplus). We calculate the Emission Jacobian $\mathbf{H}_t$ to linearize the
+non-Gaussian Poisson emission and plug into the Kalman equations. This propagates the Gaussian estimations of latent states $\mathbf{x}_t$ one time step forward each.
+\clearpage
+\paragraph{EKF forward pass prediction update}
+\begin{align*}
     \hat{\mathbf{x}}_{t|t-1} &= \mathbf{A}\hat{\mathbf{x}}_{t-1|t-1} + \mathbf{B}\mathbf{s}_t \\
     \mathbf{P}_{t|t-1}       &= \mathbf{A}\mathbf{P}_{t-1|t-1}\mathbf{A}^\top + \mathbf{Q} \\
     \mathbf{S}_t             &= \mathbf{H}_t \mathbf{P}_{t|t-1} \mathbf{H}_t^\top
@@ -180,31 +181,66 @@ For $t = 1, \dots, T$:
     \hat{\mathbf{x}}_{t|t}   &= \hat{\mathbf{x}}_{t|t-1}
                                 + \mathbf{K}_t(\mathbf{y}_t - \boldsymbol{\lambda}_{t|t-1}) \\
     \mathbf{P}_{t|t}         &= (\mathbf{I} - \mathbf{K}_t \mathbf{H}_t)\mathbf{P}_{t|t-1}
-\end{align}
+\end{align*}
+where
+\begin{itemize}
+    \item $\hat{\mathbf{x}}_{t|t-1} \in \mathbb{R}^{K}$: predicted latent state mean
+    \item $\hat{\mathbf{x}}_{t|t} \in \mathbb{R}^{K}$: filtered latent state mean
+    \item $\mathbf{P}_{t|t-1} \in \mathbb{R}^{K \times K}$: predicted latent state covariance
+    \item $\mathbf{P}_{t|t} \in \mathbb{R}^{K \times K}$: filtered latent state covariance
+    \item $\mathbf{S}_t \in \mathbb{R}^{N \times N}$: innovation covariance
+    \item $\mathbf{K}_t \in \mathbb{R}^{K \times N}$: Kalman gain
+    \item $(\mathbf{y}_t - \boldsymbol{\lambda}_{t|t-1})$: innovation (residual between observed spikes and predicted rate)
+    \item $\mathbf{Q} \in \mathbb{R}^{K \times K}$: latent process noise covariance
+    \item $\text{diag}(\boldsymbol{\lambda}_{t|t-1})^{-1}$: Poisson observation noise (variance equals mean)
+\end{itemize}
 
 \paragraph{EKF marginal log-likelihood}
-The Gaussian approximation yields the tractable objective:
-\begin{align}
+With this we have the defined objective with the approximated $\boldsymbol{\lambda}_{t|t-1}, \mathbf{S}_t$
+\begin{align*}
     \mathcal{L}(\boldsymbol{\theta})
         &\approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
                  \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
-\end{align}
+\end{align*}
+For missing data, we zero out the corresponding terms in the likelihood.
 
 \paragraph{SGD parameter update}
 Parameters are updated by differentiating through the EKF pass:
-\begin{align}
+\begin{align*}
     \boldsymbol{\theta}^{(\tau+1)}
         &= \boldsymbol{\theta}^{(\tau)}
            - \eta_\tau \,\nabla_{\boldsymbol{\theta}}\,
              \bigl[-\mathcal{L}(\boldsymbol{\theta}^{(\tau)})\bigr]
-\end{align}
-where $\eta_\tau$ is the learning rate at step $\tau$ and gradients are
-computed via automatic differentiation (JAX) through the unrolled filter.
+\end{align*}
+where $\eta_\tau$ is the effective learning rate defined by the Adam optimizer. More specifically:
+\begin{align*}
+    \mathbf{m}_{\tau} &= \beta_1 \mathbf{m}_{\tau-1}
+                         + (1-\beta_1)\,\nabla_{\boldsymbol{\theta}}
+                         \bigl[-\mathcal{L}(\boldsymbol{\theta}^{(\tau)})\bigr]
+                         \tag{momentum} \\
+    \mathbf{v}_{\tau} &= \beta_2 \mathbf{v}_{\tau-1}
+                         + (1-\beta_2)\,\nabla_{\boldsymbol{\theta}}
+                         \bigl[-\mathcal{L}(\boldsymbol{\theta}^{(\tau)})\bigr]^2
+                         \tag{RMSprop} \\
+    \hat{\mathbf{m}}_{\tau} &= \frac{\mathbf{m}_{\tau}}{1-\beta_1^\tau}, \qquad
+    \hat{\mathbf{v}}_{\tau}  = \frac{\mathbf{v}_{\tau}}{1-\beta_2^\tau}
+                         \tag{bias correction} \\
+    \boldsymbol{\theta}^{(\tau+1)}
+                      &= \boldsymbol{\theta}^{(\tau)}
+                         - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_{\tau}}+\epsilon}\,
+                         \hat{\mathbf{m}}_{\tau}
+                         \tag{parameter update}
+\end{align*}
+where $\mathbf{m}_\tau$ and $\mathbf{v}_\tau$ are the first and second moment
+estimates, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$ are the
+default hyperparameters, and $\alpha$ is the base learning rate.
+
+and gradients are computed via automatic differentiation in JAX.
 The full parameter set is:
-\begin{align}
+\begin{align*}
     \boldsymbol{\theta} &= \{\mathbf{A},\,\mathbf{B},\,\mathbf{C},\,
                              \mathbf{d},\,\mathbf{Q},\,\boldsymbol{\mu}_0,\,\boldsymbol{\Sigma}_0\}
-\end{align}
+\end{align*}
 
 
 \clearpage
