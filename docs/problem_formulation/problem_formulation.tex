@@ -97,7 +97,57 @@ Note:
 \item Columns of $\mathbf{W}$ have unit variance
 \item Ridge prior should scale as $\beta \propto \frac{1}{n}$ so in low-trial regime solution is not degenerate and high trial regime data info is respected.
 \end{itemize}
+\clearpage
+\subsection*{Minimizing the posterior covariance of W (Gaussian)}
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\mathbf{s}_{t}$ that maximizes the expected information gain about $\mathbf{W}$. Equivalently, this would be selecting $\mathbf{s}_{t}$ that minimizes the determinant of the covariance of $\mathbf{W}$ at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\mathbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
 
+\begin{equation*}
+    \boldsymbol{\lambda}_t =\mathbf{DWs}_t+\boldsymbol{\lambda}^{control}_{t}
+\end{equation*}
+
+Here, we are trying to find the optimal $\mathbf{W}^*$, where $\boldsymbol{\lambda}$, $\mathbf{s}_t$, and $\boldsymbol{\lambda}^{control}_{t}$ are known.
+\begin{align*}
+    \text{Let } & \Sigma_{t-1}
+    && \text{be the covariance matrix of $\mathbf{W}$ before trial $t-1$}\\
+    \text{Let } & \beta
+    && \text{be how we scale our data relative to our prior (could be $1/n$)}
+\end{align*}
+
+In terms of precision, we can formulate the Gaussian case as:
+\begin{equation*}
+    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T
+\end{equation*}
+
+Take the determinant
+\[
+    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T)
+\]
+
+using the matrix inversion lemma:
+\[
+    \text{det}(\mathbf{A} + \mathbf{uv}^T) = (1 + \mathbf{v}^T\mathbf{A}^{-1}\mathbf{u})\text{det}(\mathbf{A})
+\]
+\[
+    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T \Sigma_{t-1} \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}])\det(\Sigma_{t-1}^{-1})
+\]
+
+Since we minimize over $\mathbf{s}_{t}$, the objective function is therefore:
+\begin{align*}
+    \arg\max_{\mathbf{s}}\; \det\big(\Sigma_{t}^{-1}\big)
+    &= \arg\max_{\mathbf{s}}\;  \big(1+ \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
+    &= \arg\max_{\mathbf{s}}\; \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]
+\end{align*}
+
+We can further expand out:
+\begin{align*}
+    \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]=\hat{\mathbf{D}}_{t-1}\hat{\mathbf{W}}_{t-1}\mathbf{s}_{t}+\boldsymbol{\lambda}_{t}^{control}
+\end{align*}
+where $\hat{\mathbf{D}}_{t-1}$ and $\hat{\mathbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
+and $\boldsymbol{\lambda}_{t}^{control}$ is firing rate identified from control reaches.
+
+% Need to find the correct way to express how s affects the uncertainty of W
+% Then take the nuclear norm and then max min (E optimality)
+% max min singular value of precision 
 \clearpage
 \subsection*{Dynamics model}
 
@@ -106,19 +156,19 @@ Instead of assuming an instantaneous mapping $\mathbf{W}$, we model stimulation 
 \begin{align*}
     \mathbf{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
     \mathbf{x}_t &= \mathbf{A}\mathbf{x}_{t-1} + \mathbf{B}\mathbf{s}_t + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}) \\
-    \mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d} + \mathbf{D}\mathbf{s}_t\right)\right)
+    \mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d}\right)\right)
 \end{align*}
 where:
 \begin{itemize}
     \item $\mathbf{A}\in\mathbb{R}^{K\times K}$ Dynamics operator
     \item $\mathbf{B}\in\mathbb{R}^{K\times N}$: Stimulus-to-latent mapping
     \item $\mathbf{C}\in\mathbb{R}^{N\times K}$: Observation (loading) matrix
-    \item $\mathbf{D}\in\mathbb{R}^{N\times N}$: Direct ch-to-ch effect that is a diagonal matrix (TODO Might need a kernel for delayed effects)
-    \item $\mathbf{d}\in\mathbb{R}^{N}$: per-channel mean log firing rate
-    \item $\mathbf{Q}\in\mathbb{R}^{K\times K}$: latent process noise covariance
-    \item $\mathbf{s}_t\in\mathbb{R}^{N}$: stimulus input at time $t$ (Control trials just have $\vec{\mathbf{0}}$)
-    \item $\mathbf{y}_t\in\mathbb{R}^{N}$: binned spike counts
-    \item $K \ll N$ (low-rank assumption)
+    \item $\mathbf{D}\in\mathbb{R}^{N\times N}$: Direct ch-to-ch effect that is a diagonal matrix %(TODO Might need a kernel for delayed effects)
+    \item $\mathbf{d}\in\mathbb{R}^{N}$: Per-channel mean log firing rate
+    \item $\mathbf{Q}\in\mathbb{R}^{K\times K}$: Latent process noise covariance
+    \item $\mathbf{s}_t\in\mathbb{R}^{N}$: One-hot encoding of stimulus input at time $t$ (Control trials just have $\vec{\mathbf{0}}$)
+    \item $\mathbf{y}_t\in\mathbb{R}^{N}$: Binned spike counts
+    \item $K \ll N$ Low-rank assumption
 \end{itemize}
 % State space equations
 % Dimensions
@@ -130,7 +180,7 @@ where:
 \subsection*{Fitting using EKF-style integral and SGD (Ignore Ds for now)}
 The marginal likelihood is:
 \begin{align*}
-    \log p(\mathbf{y}_{1:t};\boldsymbol{\theta})
+    \log p(\mathbf{y}_{1:t}|\boldsymbol{\theta})
         &= \log \int p(\mathbf{y}_{1:t} \mid \mathbf{x}_{1:t};\boldsymbol{\theta})\,
                        p(\mathbf{x}_{1:t};\boldsymbol{\theta})\, d\mathbf{x}_{1:t}\\
 \mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d}\right)\right)\\
@@ -155,7 +205,7 @@ and $\mathbf{S}_t$ is the estimated covariance.
 This gives the approximate marginal likelihood
 \begin{align*}
     \mathcal{L}(\boldsymbol{\theta})
-        \approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
+        \approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t|\,
                 \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
 \end{align*}
 
@@ -193,16 +243,16 @@ where
     \item $(\mathbf{y}_t - \boldsymbol{\lambda}_{t|t-1})$: innovation (residual between observed spikes and predicted rate)
     \item $\mathbf{Q} \in \mathbb{R}^{K \times K}$: latent process noise covariance
     \item $\text{diag}(\boldsymbol{\lambda}_{t|t-1})^{-1}$: Poisson observation noise (variance equals mean)
+    \item $\mathbf{H}$: locally linear estimation of the emission matrix
 \end{itemize}
 
 \paragraph{EKF marginal log-likelihood}
 With this we have the defined objective with the approximated $\boldsymbol{\lambda}_{t|t-1}, \mathbf{S}_t$
 \begin{align*}
     \mathcal{L}(\boldsymbol{\theta})
-        &\approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t;\,
+        &\approx \sum_{t=1}^{T} \log \mathcal{N}(\mathbf{y}_t|\,
                  \boldsymbol{\lambda}_{t|t-1},\, \mathbf{S}_t)
 \end{align*}
-For missing data, we zero out the corresponding terms in the likelihood.
 
 \paragraph{SGD parameter update}
 Parameters are updated by differentiating through the EKF pass:
@@ -235,121 +285,232 @@ where $\mathbf{m}_\tau$ and $\mathbf{v}_\tau$ are the first and second moment
 estimates, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$ are the
 default hyperparameters, and $\alpha$ is the base learning rate.
 
-and gradients are computed via automatic differentiation in JAX.
+and gradients are computed via automatic differentiation in JAX in the dynamax package.
 The full parameter set is:
 \begin{align*}
     \boldsymbol{\theta} &= \{\mathbf{A},\,\mathbf{B},\,\mathbf{C},\,
                              \mathbf{d},\,\mathbf{Q},\,\boldsymbol{\mu}_0,\,\boldsymbol{\Sigma}_0\}
 \end{align*}
-
-
 \clearpage
-\subsection*{Minimizing the posterior covariance of W (Gaussian)}
-For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\mathbf{s}_{t}$ that maximizes the expected information gain about $\mathbf{W}$. Equivalently, this would be selecting $\mathbf{s}_{t}$ that minimizes the determinant of the covariance of $\mathbf{W}$ at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\mathbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
+\subsection*{Information criterion for B, minimizing the posterior covariance of B (Poisson LDS)}
+\textbf{Goal:} Estimate uncertainty of $\mathbf{B}$
 
+\textbf{Posterior $p(\mathbf{B} \mid \mathbf{y}_{1:t}, \mathbf{s}_{t})$}
+\begin{align*}
+    \mathbf{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
+    \mathbf{x}_t &= \mathbf{A}\mathbf{x}_{t-1} + \mathbf{B}\mathbf{s}_t + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}) \\
+    \mathbf{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\mathbf{C}\mathbf{x}_t + \mathbf{d}\right)\right)
+\end{align*}
+
+Likelihood after marginalizing out $\mathbf{x}_{1:t}$:
+\begin{align*}
+    p(\mathbf{y}_{1:t} \mid \boldsymbol{\theta}) &= \int 
+        \underbrace{p(\mathbf{y}_{1:t} \mid \mathbf{x}_{1:t}, \boldsymbol{\theta})}_{\text{Poisson emission, need EKF approx.}} \;
+        \underbrace{p(\mathbf{x}_{1:t} \mid \mathbf{s}_{t}, \boldsymbol{\theta})}_{\text{Gaussian dynamics prior}} 
+        \, d\mathbf{x}_{1:t}
+\end{align*}
+\begin{align*}
+    \boldsymbol{\theta} &= \{\mathbf{A},\,\mathbf{B},\,\mathbf{C},\,
+                             \mathbf{d},\,\mathbf{Q},\,\boldsymbol{\mu}_0,\,\boldsymbol{\Sigma}_0\}
+\end{align*}
+
+Bayes':
+\begin{align*}
+    \underbrace{p(\boldsymbol{\theta} \mid \mathbf{y}_{1:t})}_{\text{Posterior}} &= \frac{
+        \overbrace{p(\mathbf{y}_{1:t} \mid \boldsymbol{\theta})}^{\text{likelihood}} \cdot
+        \overbrace{p(\boldsymbol{\theta})}^{\text{prior}}
+    }{
+        \underbrace{p(\mathbf{y}_{1:t})}_{\text{evidence, constant in } \boldsymbol{\theta}}
+    }
+\end{align*}
+
+\textbf{Assume} $\boldsymbol{\theta} \setminus \mathbf{B} = \mathbf{A}, \mathbf{C}, \mathbf{d}, \boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0$ known from Poisson LDS fit via EKF SGD, and $\mathbf{s}_{t}$ known.
+\begin{align*}
+    p(\boldsymbol{\theta} \mid \mathbf{y}_{1:t})
+        &\propto p(\mathbf{y}_{1:t} \mid \boldsymbol{\theta}) \cdot p(\boldsymbol{\theta}) \\
+    p(\mathbf{B} \mid \mathbf{y}_{1:t}, \mathbf{s}_{t})
+        &\propto p(\mathbf{y}_{1:t} \mid \mathbf{B},\, \boldsymbol{\theta} \setminus \mathbf{B}) \cdot
+                 p(\mathbf{B}) \cdot p(\mathbf{A}) \cdot p(\mathbf{C}) \cdots
+                 \quad \text{(by independence of } \boldsymbol{\theta} \text{)}
+\end{align*}
+
+Absorbing $p(\boldsymbol{\theta} \setminus \mathbf{B})$ into the constant and expanding over $\mathbf{x}_{1:t}$:
 \begin{equation}
-    \boldsymbol{\lambda}_t =\mathbf{DWs}_t+\boldsymbol{\lambda}^{control}_{t}
+    p(\mathbf{B} \mid \mathbf{y}_{1:t}, \mathbf{s}_{t}) \propto 
+        \underbrace{p(\mathbf{B})}_{\text{Initialize via }\mathcal{N}(\mathbf{0}, \boldsymbol{\Sigma}_0^B)} 
+        \int 
+        \underbrace{p(\mathbf{y}_{1:t} \mid \mathbf{x}_{1:t}, \boldsymbol{\mathbf{B}, \theta} \setminus \mathbf{B})}_{\text{Poisson emission}} \;
+        \underbrace{p(\mathbf{x}_{1:t} \mid \mathbf{s}_{t}, \boldsymbol{\theta})}_{\text{depends on } \mathbf{B}, \text{can get from EKF}} 
+        \, d\mathbf{x}_{1:t}
+       \label{eq:posterior_B}
 \end{equation}
 
-Here, we are trying to find the optimal $\mathbf{W}^*$, where $\boldsymbol{\lambda}$, $\mathbf{s}_t$, and $\boldsymbol{\lambda}^{control}_{t}$ are known.
+Need EKF to estimate. TODO: Make sure we can split up theta components in dynamax.
+
+\clearpage
+\subsection*{One step ahead prediction in latent space to get one step ahead $\operatorname{Cov}(\mathbf{\hat{B}}_{t|t-1})$ estimation}
+
+At time step $t-1$:
 \begin{align*}
-    \text{Let } & \Sigma_{t-1}
-    && \text{be the covariance matrix of $\mathbf{W}$ before trial $t-1$}\\
+    \mathbf{x}_t &= \mathbf{A}\mathbf{x}_{t-1} + \mathbf{B}\mathbf{s}_t + \boldsymbol{\epsilon}_t
+\end{align*}
+
+Rearranging to isolate $\mathbf{\hat{B}}_{t|t-1}\mathbf{s}_t$, and substituting EKF filtered means AND predicted, poststim means $\hat{\mathbf{x}}_{t-1|t-1}, \hat{\mathbf{x}}_{t|t-1,\text{stim}}$, in place of true latent states, and accurate description of estimations:
+\begin{align*}
+    \mathbf{\hat{B}}_{t|t-1}\mathbf{s}_t &= \hat{\mathbf{x}}_{t|t-1,\text{stim}} - \hat{\mathbf{A}}\hat{\mathbf{x}}_{t-1|t-1} - \boldsymbol{\epsilon}_t
+\end{align*}
+where:
+\begin{itemize}
+    \item $\boldsymbol{\epsilon}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q})$
+    \item $\hat{\mathbf{x}}_{t-1|t-1} \sim \mathcal{N}(\mathbf{x}_{t-1}, \mathbf{P}_{t-1|t-1})$
+    \item $\hat{\mathbf{x}}_{t|t-1,\text{stim}} = \hat{\mathbf{A}}\hat{\mathbf{x}}_{t-1|t-1} + \mathbf{\hat{B}}_{t-1|t-1}\mathbf{s}_t + \boldsymbol{\epsilon}_t$
+    \item For now we ignore Cov($\hat{\mathbf{A}}$)
+\end{itemize}
+
+Now we want the covariance:
+\begin{align*}
+    \boldsymbol{\Sigma}_{B_{t|t-1}} = \operatorname{Cov}(\mathbf{\hat{B}}_{t|t-1}) &= \operatorname{Cov}(\hat{\mathbf{x}}_{t|t-1,\text{stim}}) + \operatorname{Cov}(\hat{\mathbf{A}}\hat{\mathbf{x}}_{t-1|t-1}) + \operatorname{Cov}(\boldsymbol{\epsilon}_t)\\
+    \boldsymbol{\Sigma}_{B_{t|t-1}} &\approx \operatorname{Cov}(\hat{\mathbf{A}}\hat{\mathbf{x}}_{t-1|t-1} + \mathbf{\hat{B}}_{t-1|t-1}\mathbf{s}_t + \boldsymbol{\epsilon}_t) + \hat{\mathbf{A}}\mathbf{P}_{t-1|t-1}\hat{\mathbf{A}}^\top + \mathbf{Q}\\
+    \boldsymbol{\Sigma}_{B_{t|t-1}} &\approx \operatorname{Cov}(\mathbf{\hat{B}}_{t-1|t-1}\mathbf{s}_t) + 2\hat{\mathbf{A}}\mathbf{P}_{t-1|t-1}\hat{\mathbf{A}}^\top + 2\mathbf{Q}
+\end{align*}
+
+Let $\mathbf{\hat{B}}_{t-1|t-1}\mathbf{s}_t$ be $\mathbf{Bs}$ for now.
+\begin{align*}
+    \operatorname{Cov}(\mathbf{Bs}) &= \mathbb{E}\!\left[\mathbf{Bss}^T\mathbf{B}^T\right] - \mathbb{E}[\mathbf{Bs}]\,\mathbb{E}[\mathbf{Bs}]^T
+\end{align*}
+
+IID case, which is wrong.
+\begin{align*}
+    \mathbf{B}_{ij} &\overset{\text{i.i.d.}}{\sim} \mathcal{N}(0, \sigma^2) \\
+    \operatorname{Cov}(\mathbf{Bs})
+        &= \mathbb{E}\!\left[\sum_{j \in \mathbf{s}_j} \mathbf{B}_{ij} \sum_{j \in \mathbf{s}_j} \mathbf{B}_{kj}\right]
+         - \mathbb{E}\!\left[\sum_{j \in \mathbf{s}_j} \mathbf{B}_{ij}\right] \mathbb{E}\!\left[\sum_{j \in \mathbf{s}_j} \mathbf{B}_{kj}\right] \\
+    \operatorname{Cov}(\mathbf{Bs})
+        &= \begin{cases}
+               \sum_{j \in \mathbf{s}_j} \operatorname{Var}(\mathbf{B}_{ij}) & \text{if } i = k \\
+               0 & \text{else}
+           \end{cases} \\
+    \operatorname{Cov}(\hat{\mathbf{B}}_{t-1|t-1}\,\mathbf{s}_t)
+        &= \operatorname{diag}\!\left(\boldsymbol{\Sigma}_{t-1,B}\, \mathbf{s}_t\right), \text{since $\mathbf{s}_t$ is a one-hot encoding vector.}
+\end{align*}
+\rule{\linewidth}{0.4pt}
+But more accurately, to capture the dependencies across channels (not IID), use the posterior of $\mathbf{B}$ from \eqref{eq:posterior_B}. Since $\mathbb{E}[\mathbf{B}] = \hat{\mathbf{B}}_{t-1|t-1}$:
+\begin{align*}
+    \operatorname{Cov}(\mathbf{Bs}) 
+        &= \mathbb{E}\!\left[\mathbf{Bss}^T\mathbf{B}^T\right] - \mathbb{E}[\mathbf{Bs}]\,\mathbb{E}[\mathbf{Bs}]^T \\
+    \operatorname{Cov}(\mathbf{Bs}) 
+        &= \mathbb{E}\!\left[\mathbf{B}\right]\mathbf{ss}^T\mathbb{E}\!\left[\mathbf{B}^T\right] 
+         + \operatorname{Cov}(\mathbf{B}) \cdot \mathbf{ss}^T
+         - \mathbb{E}[\mathbf{B}]\mathbf{ss}^T\mathbb{E}[\mathbf{B}]^T \\
+    \operatorname{Cov}(\hat{\mathbf{B}}_{t-1|t-1}\,\mathbf{s}_t)
+        &= \boldsymbol{\Sigma}_{B_{t-1|t-1}}\, \mathbf{s}_t\mathbf{s}_t^\top
+\end{align*}
+Substituting back:
+\begin{align*}
+    \boldsymbol{\Sigma}_{B_{t|t-1}}
+        &\approx \boldsymbol{\Sigma}_{B_{t-1|t-1}}\, \mathbf{s}_t\mathbf{s}_t^\top
+         + 2\hat{\mathbf{A}}\mathbf{P}_{t-1|t-1}\hat{\mathbf{A}}^\top + 2\mathbf{Q}
+\end{align*}
+
+How do we initialize to make sure $\boldsymbol{\Sigma}_{B_{0}}$ is properly initialized when a given $\mathbf{s}_t$ hasn't been tested?
+
+\clearpage
+\subsection*{Acquisition function for B (Poisson LDS)}
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select 
+$\mathbf{s}_t$ that maximizes the expected information gain about $\mathbf{B}$. 
+Equivalently, this would be selecting $\mathbf{s}_t$ that minimizes the determinant 
+of the covariance of $\mathbf{B}$ at time $t$.
+\begin{align*}
+    \text{Let } & \boldsymbol{\Sigma}_{t-1, B}^{-1}
+    && \text{be the precision matrix of $\mathbf{B}$ before trial $t-1$}\\
+    \text{Let } & \boldsymbol{\Delta}_t = \mathbf{B}\mathbf{s}_t
+    && \text{be the latent perturbation induced by stimulation pattern $\mathbf{s}_t$}\\
     \text{Let } & \beta
     && \text{be how we scale our data relative to our prior (could be $1/n$)}
 \end{align*}
-
 In terms of precision, we can formulate the Gaussian case as:
-\begin{equation}
-    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T
-\end{equation}
-
-Take the determinant
-\[
-    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T)
-\]
-
-using the matrix inversion lemma:
-\[
-    \text{det}(\mathbf{A} + \mathbf{uv}^T) = (1 + \mathbf{v}^T\mathbf{A}^{-1}\mathbf{u})\text{det}(\mathbf{A})
-\]
-\[
-    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T \Sigma_{t-1} \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}])\det(\Sigma_{t-1}^{-1})
-\]
-
-Since we minimize over $\mathbf{s}_{t}$, the objective function is therefore:
+\begin{equation*}
+    \boldsymbol{\Sigma}_{t, B}^{-1} = \boldsymbol{\Sigma}_{t-1, B}^{-1}
+    + \beta \; \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t] 
+               \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]^\top
+\end{equation*}
+Taking the determinant and applying the matrix determinant lemma:
 \begin{align*}
-    \arg\max_{\mathbf{s}}\; \det\big(\Sigma_{t}^{-1}\big)
-    &= \arg\max_{\mathbf{s}}\;  \big(1+ \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
-    &= \arg\max_{\mathbf{s}}\; \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]
+    \det\boldsymbol{\Sigma}_{t}^{-1,B} 
+    &= \det\!\Big(\boldsymbol{\Sigma}_{t-1, B}^{-1}
+       + \beta\,\mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]
+                \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]^\top\Big) \\
+    &= \Big(1 + \beta\,\mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]^\top
+       \boldsymbol{\Sigma}_{t-1}^{B}\,
+       \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]\Big)
+       \det\!\big(\boldsymbol{\Sigma}_{t-1, B}^{-1}\big)
 \end{align*}
-
-We can further expand out:
+Since we minimize over $\mathbf{s}_t$, the objective function is therefore:
 \begin{align*}
-    \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]=\hat{\mathbf{D}}_{t-1}\hat{\mathbf{W}}_{t-1}\mathbf{s}_{t}+\boldsymbol{\lambda}_{t}^{control}
+    \arg\max_{\mathbf{s}}\;\det\big(\boldsymbol{\Sigma}_{t, B}^{-1}\big)
+    &= \arg\max_{\mathbf{s}}\;\Big(1 + \beta\,\mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]^\top
+       \boldsymbol{\Sigma}_{t-1}^{B}\,
+       \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]\Big)
+       \det\!\big(\boldsymbol{\Sigma}_{t-1, B}^{-1}\big) \\
+    &= \arg\max_{\mathbf{s}}\;\beta\,\mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]^\top
+       \boldsymbol{\Sigma}_{t-1}^{B}\,
+       \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t]
 \end{align*}
-where $\hat{\mathbf{D}}_{t-1}$ and $\hat{\mathbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
-and $\boldsymbol{\lambda}_{t}^{control}$ is firing rate identified from control reaches.
-
-% Need to find the correct way to express how s affects the uncertainty of W
-% Then take the nuclear norm and then max min (E optimality)
-% max min singular value of precision 
+We can further expand out the expected perturbation in latent space:
+\begin{align*}
+    \mathbb{E}[\boldsymbol{\Delta}_t \mid \mathbf{s}_t] 
+    = \hat{\mathbf{B}}_{t-1}\mathbf{s}_t
+\end{align*}
+where $\hat{\mathbf{B}}_{t-1}$ is estimated from timepoints $i = 1,\ldots,t-1$, giving the 
+final objective:
+\begin{align*}
+    \arg\max_{\mathbf{s}}\;\beta\,
+    \mathbf{s}_t^\top \hat{\mathbf{B}}_{t-1}^\top
+    \boldsymbol{\Sigma}_{t-1}^{B}\,
+    \hat{\mathbf{B}}_{t-1}\mathbf{s}_t
+\end{align*}
+Problems:
+\begin{enumerate}
+    \item Need to expand to KxN for the precision matrix, instead of a K x K matrix. Current formulation gives you which latent to stim, which gives you probably channels just based on its contribution/composition of the latents
+    \item Compositional model?
+    \item This is for one timepoint, don't worry too much about some kind of t to t+k information update, before deciding on the next step, where t+k is the next stim
+    \item Tried fitting the PLDS with a step term ($\mathbf{C}\times \text{step}(t)$) before, but doesn't seem to do well.
+    \item Try to find closed form after plugging in $\mathbb{E}\!\left[\mathbf{B}\right]$?
+\end{enumerate}
 
 \clearpage
-\subsection*{Poisson MLE for rate estimation}
+\subsection*{Dynamics model + Behavior (Not rigorous, for class project)}
 \begin{align*}
-\text{Let } & s_i \in \{0,1\} 
-&& \text{be the selection of stimulation channels } i,
-\quad i = 1,\ldots,N \\
-\text{Let } & r \in \mathbb{R}^M
-&& \text{be the recorded response from } M \text{ recording channels}
+    \mathbf{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
+    \mathbf{x}_t &= \mathbf{A}\mathbf{x}_{t-1} + \mathbf{B}\mathbf{s}_t + \mathbf{F}\mathbf{z}_{t-1} + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}) \\
+    \mathbf{y}_t &\sim \text{Poisson}\big(\text{softplus}(\mathbf{C}\mathbf{x}_t + \mathbf{d} + \mathbf{D}\mathbf{s}_t)\big) \\
+    \mathbf{z}_t &\sim \mathcal{N}(\mathbf{G}\mathbf{x}_t + \mathbf{g}, \mathbf{R})
 \end{align*}
-
-We assume a linear-Poisson model where the response is generated as:
-\begin{align*}
-r_j &\sim \text{Poisson}(\lambda_j), \text{where } \lambda_j 
-= \sum_{k=1}^K D_{jk}\, z_k + \lambda_j^{control} \\
-\lambda_{j}  &:\ \text{firing rate of channel j} \\
-D_{jk} &:\ \text{weight from latent variable } k \text{ to recording channel } j \\
-z_{k}  &:\ \text{latent variable k (Assumes rate to stim-channel relationship is low-rank)} \\
-K      &:\ \text{total number of latent variables} \\
-\lambda_j^{control}    &:\ \text{firing rate of recording channel } j \text{ identified from control reaches}
-\end{align*}
-
-We further define the matrix $W = [w_{ki}]$ which identifies the mapping from the stimulation pattern $s_{i}$ to latent variable $z_{k}$
-
-\begin{align*}
-z_k =  \sum_{i=1}^N W_{ki}\, s_i\\
-\end{align*}
-
-Given a set of stimulation patterns and recorded responses $\{(\mathbf{s}_t, \mathbf{r}_t)\}_{t=1}^T$, where $T$ is the number of trials. The Poisson likelihood is
-\begin{equation}
-    \mathcal{L}(r; \lambda) = \prod_{t=1}^T \prod_{j=1}^M \frac{e^{-\lambda_{j, t}} (\lambda_{j, t})^{r_{j, t}}}{r_{j, t}!}
-\end{equation}
-
-{\centering 
-where $\lambda_{j,t} = \sum_{k=1}^K \sum_{i=1}^N D_{jk}\, W_{ki}\, s_{i,t} + \lambda_{j,t}^{control}$\par}
-This gives the log-likelihood:
-\begin{equation}
-    \log \mathcal{L}(r; \lambda) = \sum_{t=1}^T \sum_{j=1}^M ( -\lambda_{j,t} + r_{j,t} \log \lambda_{j,t} - \log (r_{j,t}!))
-\end{equation}
-Constraints:
+where:
 \begin{itemize}
-    \item $\lambda_{j} \geq 0$ (non-negative firing rate) or just use softplus link function, which cancels out with log?
-    \item $\lambda_{j} \geq 0$ (non-negative control firing rate)
+    \item $\mathbf{A} \in \mathbb{R}^{K \times K}$: Dynamics operator
+    \item $\mathbf{B} \in \mathbb{R}^{K \times N}$: Stimulus-to-latent mapping
+    \item $\mathbf{C} \in \mathbb{R}^{N \times K}$: Observation (loading) matrix
+    \item $\mathbf{D} \in \mathbb{R}^{N \times N}$: Direct ch-to-ch effect, diagonal matrix
+    \item $\mathbf{d} \in \mathbb{R}^{N}$: Per-channel mean log firing rate
+    \item $\mathbf{F} \in \mathbb{R}^{K \times 12}$: Kinematics-to-latent feedback mapping
+    \item $\mathbf{G} \in \mathbb{R}^{12 \times K}$: Latent-to-kinematics readout matrix
+    \item $\mathbf{g} \in \mathbb{R}^{12}$: Per-channel kinematic bias
+    \item $\mathbf{Q} \in \mathbb{R}^{K \times K}$: Latent process noise covariance
+    \item $\mathbf{R} \in \mathbb{R}^{12 \times 12}$: Kinematic observation noise covariance
+    \item $\mathbf{s}_t \in \mathbb{R}^{N}$: One-hot encoding of stimulus input at time $t$ (control trials have $\mathbf{s}_t = \mathbf{0}$)
+    \item $\mathbf{y}_t \in \mathbb{R}^{N}$: Binned spike counts
+    \item $\mathbf{z}_t \in \mathbb{R}^{12}$: Stacked IMU position and velocity from wrist and upper arm bands, $\mathbf{z}_t = [\mathbf{p}_{w,t}^\top,\ \mathbf{v}_{w,t}^\top,\ \mathbf{p}_{u,t}^\top,\ \mathbf{v}_{u,t}^\top]^\top$
+    \item $K \ll N$: Low-rank assumption
 \end{itemize}
 
 \clearpage
 \subsection*{TODO}
 \begin{itemize}
     \item Since s is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\mathbf{s}$
-    \item Try to find closed form after plugging in E[$\boldsymbol{\lambda} $]?
     \item Forgot to index via trial in Poisson MLE section?
     \item Projected is projecting the final to discrete, proximal is projecting each step
-    \item Softplus as a rectifier for $\boldsymbol{\lambda} $
-    \item Combine Poisson MLE rate estimation and optimization of s into an algorithm
     % \item Also need to add "state" about movement vs at rest
-    \item Need to check $\mathbf{DW}$ is low rank in real data
     \item Simulate the Linear-Poisson model to make sure statistics align
 \end{itemize}
 
@@ -473,7 +634,3 @@ Constraints:
 
 \vspace{-1cm}
 \end{document}
-
-
-
-
