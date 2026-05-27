@@ -1,0 +1,144 @@
+\documentclass[11pt,letterpaper]{article} % Page layout
+\usepackage[margin=0.8in]{geometry}
+\usepackage{setspace, indentfirst}
+\usepackage{amsmath, amssymb, amsfonts, amsthm, bm, commath} % Math
+\usepackage{graphicx, subcaption, wrapfig, caption} % Figures
+\usepackage{sidecap, caption}
+\usepackage{xcolor, enumitem} % Text / formatting
+\usepackage[small,compact]{titlesec}
+\usepackage[superscript,biblabel]{cite}
+\usepackage{hyperref, url} % Citations / links
+\newcommand{\inlinecomment}[1]{}
+
+\pagenumbering{gobble}
+\topmargin=-0.45in
+\headsep=0.25in
+\title{\vspace{-2.5cm} WASABI (Input output / one timepoint version) \\
+  \large  \vspace{-0.4cm}}
+% \author{Student: Bryan Tseng, Advisors: Adam S. Charles}
+\date{\vspace{-0.5cm}}
+\begin{document}
+
+\maketitle
+\vspace{-0.7cm}
+\subsection*{Simplified formulation}
+\begin{align*}
+\mathbf{r} &\sim \mathrm{Poisson}(\boldsymbol{\lambda}) \\
+\boldsymbol{\lambda}^{\mathrm{stim}} &= \mathbf{Cs} + \boldsymbol{\lambda}^{\mathrm{control}} \\
+\mathbf{C} &= \mathbf{DW}_{\text{low-rank}}
+\end{align*}
+\begin{align*}
+\mathbf{r} &:\ \text{Recorded responses (spikes)}\\
+\boldsymbol{\lambda}  &:\ \text{Firing rates} \\
+\mathbf{C} &:\ \text{Mapping from stimulation channels to firing rates} \\
+\mathbf{s} &:\ \text{Selection of stimulation channels}\\
+\mathbf{D} &:\ \text{Mapping from latent variables to recorded responses} \\
+\mathbf{W}_{\text{low-rank}} &:\ \text{Low rank mapping from stimulation channels to latent variables}
+\end{align*}
+
+\begin{itemize}
+\item $\mathbf{W}$ is unknown.
+\item At time t-1, we want to find $\mathbf{s}_t$ that maximizes the information about $\mathbf{W}$, given $\mathbf{r}_{1:t-1}$ and $\mathbf{s}_{1:t-1}$
+\end{itemize}
+
+\clearpage
+\subsection*{Ridge regression for learning W at time t}
+If we assume we know $D_t$ at time $t$, we estimate $\mathbf{W}_t$ using a ridge least-squares objective:
+\begin{align*}
+\hat{\mathbf{W}}_t &= \arg\min_{\mathbf{W}}
+||\mathbf{Z-WS}||_F^2 + \beta||\mathbf{W}||_F^2
+\end{align*}
+where $\beta$ is the weight of the ridge prior. We can expanding the Frobenius norm using trace:
+\begin{align*}
+\mathcal{L}(\hat{\mathbf{W}}_t) &= tr[(\mathbf{Z-WS})(\mathbf{Z-WS})^{\top}]+\beta \,tr(\mathbf{WW}^{\top})\\
+\mathcal{L}(\hat{\mathbf{W}}_t)&=tr(\mathbf{ZZ}^{\top})
+- 2\,tr(\mathbf{ZS^{\top}W^{\top}}) + tr(\mathbf{WSS^{\top}W^{\top}})
++ \beta \,tr(\mathbf{WW}^{\top})
+\end{align*}
+Keep terms relative to $\mathbf{W}_t$
+\begin{align*}
+\mathcal{L}(\hat{\mathbf{W}}_t)= -2\,\mathrm{tr}(\mathbf{ZS}^{\top}\mathbf{W}^{\top})
++ \mathrm{tr}(\mathbf{WSS^{\top}W^{\top}})
++ \beta \,\mathrm{tr}(\mathbf{WW}^{\top})
+\end{align*}
+Taking derivative and set to zero:
+
+\begin{align*}
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}} &= -2\,\mathbf{ZS}^{\top}
++ 2\,\mathbf{WSS}^{\top}
++ 2\beta\,\mathbf{W}\\
+0 &= -2\,\mathbf{ZS}^{\top} + 2\,\mathbf{WSS}^{\top}+ 2\beta\,\mathbf{W}\\
+\mathbf{WSS}^{\top} &+ \beta \mathbf{W} = \mathbf{ZS}^{\top}\\
+\mathbf{W}(\mathbf{SS}^{\top} &+ \beta \mathbf{I}) = \mathbf{ZS}^{\top}
+\end{align*}
+\begin{align*}
+\boxed{\mathbf{W}=\mathbf{ZS}^{\top}(\mathbf{SS}^{\top}+\beta \mathbf{I})^{-1}}
+\end{align*}
+
+\subsection*{Generative model for perturbation}
+\begin{align*}
+(\boldsymbol{\lambda}_{\text{stim}}-\boldsymbol{\lambda}_{\text{control}})=\mathbf{D}(\mathbf{WS}+\boldsymbol{\xi})+\boldsymbol{\eta}
+\end{align*}
+Note:
+\begin{itemize}
+\item Current loss is written for estimating $\mathbf{W}_t$
+\item $\mathbf{D}$ - learned from control? or learn jointly with trials t (Alternateing or SVD)?
+\item $\boldsymbol{\xi}_t$ is perturbation noise (e.g.\ mismatch between intended and actual stim-response effects) - hyperparameter, match data?
+\item $\boldsymbol{\eta}$: observation noise - hyperparameter, match data?
+\item Columns of $\mathbf{W}$ have unit variance
+\item Ridge prior should scale as $\beta \propto \frac{1}{n}$ so in low-trial regime solution is not degenerate and high trial regime data info is respected.
+\end{itemize}
+\clearpage
+\subsection*{Minimizing the posterior covariance of W (Gaussian)}
+For adaptive selection of stimulation patterns, at each trial $t$, we want to select $\mathbf{s}_{t}$ that maximizes the expected information gain about $\mathbf{W}$. Equivalently, this would be selecting $\mathbf{s}_{t}$ that minimizes the determinant of the covariance of $\mathbf{W}$ at time t. We separate out the Poisson MLE rate estimation and identification of the optimal $\mathbf{W}^*$ in our formulation. This formulation could be good for control-theoretic implementations later too.
+
+\begin{equation*}
+    \boldsymbol{\lambda}_t =\mathbf{DWs}_t+\boldsymbol{\lambda}^{control}_{t}
+\end{equation*}
+
+Here, we are trying to find the optimal $\mathbf{W}^*$, where $\boldsymbol{\lambda}$, $\mathbf{s}_t$, and $\boldsymbol{\lambda}^{control}_{t}$ are known.
+\begin{align*}
+    \text{Let } & \Sigma_{t-1}
+    && \text{be the covariance matrix of $\mathbf{W}$ before trial $t-1$}\\
+    \text{Let } & \beta
+    && \text{be how we scale our data relative to our prior (could be $1/n$)}
+\end{align*}
+
+In terms of precision, we can formulate the Gaussian case as:
+\begin{equation*}
+    \Sigma_{t}^{-1} = \Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T
+\end{equation*}
+
+Take the determinant
+\[
+    \text{det}\;\Sigma_{t}^{-1} = \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T)
+\]
+
+using the matrix inversion lemma:
+\[
+    \text{det}(\mathbf{A} + \mathbf{uv}^T) = (1 + \mathbf{v}^T\mathbf{A}^{-1}\mathbf{u})\text{det}(\mathbf{A})
+\]
+\[
+    \text{det}(\Sigma_{t-1}^{-1} + \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}] \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T) =  (1+ \beta \; \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^T \Sigma_{t-1} \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}])\det(\Sigma_{t-1}^{-1})
+\]
+
+Since we minimize over $\mathbf{s}_{t}$, the objective function is therefore:
+\begin{align*}
+    \arg\max_{\mathbf{s}}\; \det\big(\Sigma_{t}^{-1}\big)
+    &= \arg\max_{\mathbf{s}}\;  \big(1+ \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]\big)\,\det(\Sigma_{t-1}^{-1})\\
+    &= \arg\max_{\mathbf{s}}\; \beta \,\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]^{\top}\Sigma_{t-1}\mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]
+\end{align*}
+
+We can further expand out:
+\begin{align*}
+    \mathbb{E}[\boldsymbol{\lambda} _t\mid \mathbf{s}_{t}]=\hat{\mathbf{D}}_{t-1}\hat{\mathbf{W}}_{t-1}\mathbf{s}_{t}+\boldsymbol{\lambda}_{t}^{control}
+\end{align*}
+where $\hat{\mathbf{D}}_{t-1}$ and $\hat{\mathbf{W}}_{t-1}$ are estimated from timepoints $i = 1,\ldots, t-1$
+and $\boldsymbol{\lambda}_{t}^{control}$ is firing rate identified from control reaches.
+
+Need to find the correct way to express how s affects the uncertainty of W
+Then take the nuclear norm and then max min (E optimality)
+max min singular value of precision 
+
+\vspace{-1cm}
+\end{document}
