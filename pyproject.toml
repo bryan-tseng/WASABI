@@ -6,6 +6,8 @@ dependencies = [
     "numpy",
     "matplotlib",
     "scipy",
+    "ipykernel>=7.3.0",
+    "scikit-learn>=1.7.2",
 ]
 
 [build-system]
