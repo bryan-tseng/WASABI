@@ -1,14 +1,26 @@
 [project]
 name = "wasabi"
 version = "0.1.0"
-requires-python = ">=3.10"
+# jax>=0.11 requires Python>=3.12; the declared floor must match.
+requires-python = ">=3.12"
 dependencies = [
     "numpy",
     "matplotlib",
     "scipy",
     "ipykernel>=7.3.0",
     "scikit-learn>=1.7.2",
+    # src/wasabi/masked_plds.py and plds_fit.py import these at module load,
+    # so `import wasabi` fails without them.
+    "jax>=0.11",
+    "optax>=0.2.8",
+    # The JAX substrate of TFP. The last stable tensorflow-probability release
+    # predates jax>=0.11, so the nightly is currently the only working build.
+    "tfp-nightly>=0.26.0.dev0",
 ]
+
+[project.optional-dependencies]
+# GPU build of jaxlib. Install with: pip install -e ".[cuda]"
+cuda = ["jax[cuda12]>=0.11"]
 
 [build-system]
 requires = ["hatchling"]

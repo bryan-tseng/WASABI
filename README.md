@@ -23,20 +23,26 @@ Outputs:
 
 ---
 # Installing the pipeline
-Use **Anaconda Prompt** on windows, make sure you have CUDA installed
+Requires **Python >= 3.12** (`jax >= 0.11`).
+
+The project is managed with [uv](https://docs.astral.sh/uv/).
+
 ```bash
-*navigate to desired directory*
-# 1) clone repo
 git clone https://github.com/bryan-tseng/WASABI
 cd WASABI
+uv sync --extra cuda
+```
 
-# 2) create environment
-conda env create -f environment.yml -n wasabi
-conda activate wasabi
+`uv sync` creates `.venv/` and installs the GPU build.
+Run scripts with `uv run python ...`, or activate the environment with
+`source .venv/bin/activate` (`.venv\Scripts\activate` on Windows).
+
+### Without uv
+```bash
+python -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-
-# 3) install WASABI package in editable mode
-pip install -e .
+pip install -r requirements.txt   # pinned transitive deps
+pip install -e .                  # or: pip install -e ".[cuda]"
 ```
 
 ---
@@ -46,8 +52,8 @@ pip install -e .
 
 
 ## Outputs
-1. Raster plots of first trial
-2. Spike times of simulated data (nTrial x nChannel x Time of spikes)
+1. 
+2. 
 
 
 ## TODOs
