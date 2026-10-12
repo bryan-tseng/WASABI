@@ -60,25 +60,48 @@ def loss_fn(theta, observations, inputs, keep, Q_dyn, V, B_SCALE, BETA_STIM, BET
     # Unpack
     C, d, A, B, b = theta
     state_dim = A.shape[0]
+    
     # Penalty for A
     penalty_A = 1e2 * jnp.maximum(0.0, jnp.linalg.norm(A, ord=2) - 1.0) ** 2
 
     # Get callable functions
     h, r, f = model_fns(C, d, A, B, b, V, B_SCALE, BETA_STIM, BETA_EMIT)
 
-    keep_b = jnp.broadcast_to(keep, observations.shape[:2])
+    keep_broadcasted = jnp.broadcast_to(keep, observations.shape[:2]) # broadcast to match dimensions of observations
 
     # Get ll from mask-aware filter
     ll, *_ = vmap(lambda y, u, k: filter_masked(
         h, r, f, Q_dyn, jnp.zeros(state_dim), jnp.eye(state_dim), y, u, k
-    ))(observations, inputs, keep_b)
+    ))(observations, inputs, keep_broadcasted)
     return -jnp.sum(ll) + penalty_A
 
 
 def run_smoother(theta, observations, inputs, keep, Q_dyn, V, B_SCALE, BETA_STIM, BETA_EMIT):
-    """Run the masked batch smoother for a parameter set, wrapped in a Posterior."""
+    """Run the masked batch smoother for a parameter set, wrapped in a Posterior object.
+    This gives you the smoothed latents for plotting.
+
+    Args:
+        theta (_type_): _description_
+        observations (_type_): _description_
+        inputs (_type_): _description_
+        keep (_type_): _description_
+        Q_dyn (_type_): _description_
+        
+        V: (n_ch, n_ch) spatial spread matrix.
+        B_SCALE: scale factor applied to B.
+        BETA_STIM: softplus sharpness for the stim path.
+        BETA_EMIT: softplus sharpness for the observation link.
+        
+    Returns:
+        Posterior (Posterior object): Posterior object that includes:
+            marginal likelihood
+            filtered_means
+            filtered_covariances
+            smoothed_means
+            smoothed_covariances
+    """
     h, r, f = model_fns(*theta, V, B_SCALE, BETA_STIM, BETA_EMIT)
-    state_dim = theta[2].shape[0]  # A
+    state_dim = theta[2].shape[0]
     return Posterior(*batch_smooth(h, r, f, Q_dyn, jnp.zeros(state_dim),
                                     jnp.eye(state_dim), observations, inputs, keep))
 

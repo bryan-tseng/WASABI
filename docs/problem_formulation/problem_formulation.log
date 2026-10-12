@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.2.20)  30 JUN 2026 11:41
+This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.2.20)  9 SEP 2026 14:30
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -455,99 +455,120 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.123 \clearpage
+l.125 \clearpage
                  [2]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.188 \clearpage
+l.147 \clearpage
                  [3
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.257 \clearpage
+l.214 \clearpage
                  [4
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.288 \clearpage
+l.283 \clearpage
                  [5
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.363 ...}_i$, $\hat{\bm{d}}_i$, $\hat{\bm{b}}_i$}
-                                                   [6
+l.310 \clearpage
+                 [6
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.425 \clearpage
-                 [7]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+l.357 \clearpage
+                 [7
+
+]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.481 \clearpage
+l.413 \clearpage
                  [8
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.537 \clearpage
+l.470 \clearpage
                  [9
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.592 \clearpage
+l.557 \clearpage
                  [10
 
-]
-
-LaTeX Warning: Hyper reference `sec:kalman_update' on page  undefined on input line 599.
-
-pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.721 \clearpage
-                 [11
+l.628 \end{align*}
+                   [11
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.733 \clearpage
-                 [12
-
-]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+l.634 \clearpage
+                 [12]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.848 \end{align*}
+l.794 \end{align*}
                    [13
 
 ]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.872 \end{document}
-                     [14] (./problem_formulation.aux)
+l.837 \clearpage
+                 [14]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+<to be read again> 
+                   \relax 
+l.1062 \end{align*}
+                    [15
 
-LaTeX Warning: There were undefined references.
+]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+<to be read again> 
+                   \relax 
+l.1173 \clearpage
+                  [16]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+<to be read again> 
+                   \relax 
+l.1217 \clearpage
+                  [17
 
+]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+<to be read again> 
+                   \relax 
+l.1237 \clearpage
+                  [18
+
+]pdfTeX warning (ext4): destination with the same identifier (name{page.}) has been already used, duplicate ignored
+<to be read again> 
+                   \relax 
+l.1250 \end{document}
+                      [19
+
+] (./problem_formulation.aux)
 Package rerunfilecheck Info: File `problem_formulation.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 13002 strings out of 480171
- 205559 string characters out of 5894489
- 517762 words of memory out of 5000000
- 30710 multiletter control sequences out of 15000+600000
+ 13009 strings out of 480171
+ 205563 string characters out of 5894489
+ 517739 words of memory out of 5000000
+ 30708 multiletter control sequences out of 15000+600000
  481689 words of font info for 73 fonts, out of 8000000 for 9000
  59 hyphenation exceptions out of 8191
- 67i,17n,77p,669b,463s stack positions out of 5000i,500n,10000p,200000b,80000s
+ 67i,17n,77p,636b,543s stack positions out of 5000i,500n,10000p,200000b,80000s
  </home/bryan/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1095.600pk></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr17.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb>
-Output written on problem_formulation.pdf (14 pages, 262367 bytes).
+Output written on problem_formulation.pdf (19 pages, 278509 bytes).
 PDF statistics:
- 230 PDF objects out of 1000 (max. 8388607)
- 175 compressed objects within 2 object streams
- 56 named destinations out of 1000 (max. 500000)
+ 252 PDF objects out of 1000 (max. 8388607)
+ 192 compressed objects within 2 object streams
+ 65 named destinations out of 1000 (max. 500000)
  1 words of extra memory for PDF output out of 10000 (max. 10000000)
 

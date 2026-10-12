@@ -44,32 +44,32 @@ def filter_masked(h, r_diag, f, Q, x0, P0, y, u, keep):
         P_next = F @ P_filt @ F.T + Q
         return (ll + ll_t, x_next, P_next), (x_filt, P_filt, x_next, P_next)
 
-    (ll, _, _), (mf, Pf, mp, Pp) = jax.lax.scan(
+    (ll, _, _), (xf, Pf, mp, Pp) = jax.lax.scan(
         step, (0.0, x0, P0), jnp.arange(y.shape[0]))
-    return ll, mf, Pf, mp, Pp
+    return ll, xf, Pf, mp, Pp
 
 
-def smooth_masked(h, r_diag, f, Q, m0, P0, y, u, keep):
+def smooth_masked(h, r_diag, f, Q, x0, P0, y, u, keep):
     """Forward filter plus RTS backward pass. Returns (loglik, filtered, smoothed) means/covs."""
-    ll, mf, Pf, mp, Pp = filter_masked(h, r_diag, f, Q, m0, P0, y, u, keep)
+    ll, xf, Pf, xp, Pp = filter_masked(h, r_diag, f, Q, x0, P0, y, u, keep)
 
     def step(carry, t):
-        ms_next, Ps_next = carry
-        F = jacfwd(lambda z: f(z, u[t]))(mf[t])
+        xs_next, Ps_next = carry
+        F = jacfwd(lambda z: f(z, u[t]))(xf[t])
         G = jnp.linalg.solve(Pp[t], F @ Pf[t]).T
-        ms = mf[t] + G @ (ms_next - mp[t])
+        xs = xf[t] + G @ (xs_next - xp[t])
         Ps = Pf[t] + G @ (Ps_next - Pp[t]) @ G.T
-        return (ms, Ps), (ms, Ps)
+        return (xs, Ps), (xs, Ps)
 
     T = y.shape[0]
-    _, (ms, Ps) = jax.lax.scan(
-        step, (mf[-1], Pf[-1]), jnp.arange(T - 1), reverse=True)
-    ms = jnp.vstack([ms, mf[-1][None]])
+    _, (xs, Ps) = jax.lax.scan(
+        step, (xf[-1], Pf[-1]), jnp.arange(T - 1), reverse=True)
+    xs = jnp.vstack([xs, xf[-1][None]])
     Ps = jnp.vstack([Ps, Pf[-1][None]])
-    return ll, mf, Pf, ms, Ps
+    return ll, xf, Pf, xs, Ps
 
 
 def batch_smooth(h, r_diag, f, Q, m0, P0, Y, U, keep):
     """vmap over trials. keep is (T,) shared or (n_trials, T)."""
-    keep_b = jnp.broadcast_to(keep, Y.shape[:2]) if keep.ndim == 1 else keep
-    return vmap(lambda y, u, k: smooth_masked(h, r_diag, f, Q, m0, P0, y, u, k))(Y, U, keep_b)
+    keep_broadcasted = jnp.broadcast_to(keep, Y.shape[:2]) if keep.ndim == 1 else keep
+    return vmap(lambda y, u, k: smooth_masked(h, r_diag, f, Q, m0, P0, y, u, k))(Y, U, keep_broadcasted)

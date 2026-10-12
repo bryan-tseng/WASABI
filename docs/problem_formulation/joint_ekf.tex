@@ -1,0 +1,201 @@
+\documentclass[11pt,letterpaper]{article} % Page layout
+\usepackage[margin=0.8in]{geometry}
+\usepackage{setspace, indentfirst}
+\usepackage{amsmath, amssymb, amsfonts, amsthm, bm, commath} % Math
+\usepackage{graphicx, subcaption, wrapfig, caption} % Figures
+\usepackage{sidecap, caption}
+\usepackage{xcolor, enumitem} % Text / formatting
+\usepackage[small,compact]{titlesec}
+\usepackage[superscript,biblabel]{cite}
+\usepackage{hyperref, url} % Citations / links
+\newcommand{\inlinecomment}[1]{}
+
+\title{WASABI Joint EKF}
+\date{September 2026}
+
+\begin{document}
+
+\maketitle
+
+\section*{Model}
+\vspace{-0.8cm}
+\begin{align*}
+    \bm{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0), \qquad\qquad \bm{u} = \text{softplus}\!\left(\bm{V}\bm{s}_{t_{stim}} + \bm{b}\right) \\
+    \bm{x}_t &= \bm{A}\bm{x}_{t-1} + \bm{Bu} + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
+    \bm{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\bm{C}\bm{x}_t + \bm{d}\right)\right)
+\end{align*}
+\vspace{-0.3cm}
+
+\noindent
+\begin{minipage}[t]{0.47\textwidth}
+\textbf{Variables}
+\begin{itemize}[leftmargin=*, itemsep=0em, topsep=0.2em]
+    \item $\bm{x}_t \in \mathbb{R}^K$: latent state at time $t$
+        \begin{itemize}[itemsep=0em, topsep=0em]
+            \item[$-$] $K$ is the latent dimensionality
+        \end{itemize}
+    \item $\bm{y}_t \in \mathbb{Z}_{\geq 0}^N$: binned spike count vector at time $t$
+        \begin{itemize}[itemsep=0em, topsep=0em]
+            \item[$-$] $N$ is the number of channels
+        \end{itemize}
+    \item $\bm{s}_t \in \{0,1\}^N$: one-hot stim indicator at time $t$
+        \begin{itemize}[itemsep=0em, topsep=0em]
+            \item[$-$] zero vector on control trials
+            \item[$-$] stimulation occurs at $t = t_{\mathrm{stim}}$
+        \end{itemize}
+\end{itemize}
+
+\textbf{Hyperparameters}
+\begin{itemize}[leftmargin=*, itemsep=0em, topsep=0.2em]
+    \item $K \in \mathbb{Z}_{+}$: latent dimensionality
+        \begin{itemize}[itemsep=0em, topsep=0em]
+            \item[$-$] $K \ll N$, low-rank assumption
+        \end{itemize}
+    \item $w \in \mathbb{R}_{+}$: stim spatial spread radius
+    \item $\bm{V} \in \mathbb{R}^{N \times N}$: Toeplitz matrix encoding spatial current spread
+\end{itemize}
+\end{minipage}
+\hfill\vline\hfill
+\begin{minipage}[t]{0.47\textwidth}
+\textbf{Fitted parameters}
+\begin{itemize}[leftmargin=*, itemsep=0.3em]
+    \item $\bm{A} \in \mathbb{R}^{K \times K}$: dynamics operator
+    \item $\bm{B} \in \mathbb{R}^{K \times N}$: stimulus-to-latent mapping
+    \item $\bm{b} \in \mathbb{R}^{K}$: perturbation threshold
+        \begin{itemize}[itemsep=0em, topsep=0em]
+            \item[$-$] what stim strength would perturb latents
+        \end{itemize}
+    \item $\bm{C} \in \mathbb{R}^{N \times K}$: observation (loading) matrix
+    \item $\bm{d} \in \mathbb{R}^{N}$: per-channel mean log-firing rate
+    \item $\bm{Q} \in \mathbb{R}^{K \times K}$: latent process noise covariance
+    \item $\bm{\mu}_0 \in \mathbb{R}^K$, $\boldsymbol{\Sigma}_0 \in \mathbb{R}^{K \times K}$: initial state mean and covariance
+    \item $\bm{\theta} = \{\bm{A, B, b, C, d, Q, \mu_0, \Sigma_0}\}$: full parameter set
+\end{itemize}
+\end{minipage}
+\[
+    V_{ij} = \frac{1}{Z(w)}\exp\!\left(-\frac{(i-j)^2}{2w^2}\right) \quad
+    Z(w) = \sum_{k=-\infty}^{\infty}\exp\!\left(-\frac{k^2}{2w^2}\right)
+\]
+
+
+\section*{Joint Extended Kalman Filter}
+We want to track uncertainty about $\bm{B}$ \textit{and} $\bm{x}$ simultaneously, since the goal is to pick stimulation vectors that minimize our uncertainty about the stim-to-latent mapping. We can augment the Kalman filter state to track both simultaneously:
+
+\[
+\widetilde{\bm{x}} = \begin{bmatrix}
+\bm{x}\\
+\textrm{vec}(\bm{B})
+\end{bmatrix}
+\]
+
+Our matrices then naturally become:
+
+\[
+\widetilde{\bm{A}}_{t \not= \tau} = \begin{bmatrix}
+    A & 0 \\
+    0 & I_{KN}
+\end{bmatrix},
+\quad
+\widetilde{\bm{A}}_{t = \tau} = \begin{bmatrix}
+    A & \bm{u}^T \otimes I_K \\
+    0 & I_{KN}
+\end{bmatrix},
+\quad
+\widetilde{\bm{C}} = \begin{bmatrix}
+    C & 0 \\
+\end{bmatrix},
+\quad
+\widetilde{\bm{Q}} = \begin{bmatrix}
+    Q & 0 \\
+    0 & 0 
+\end{bmatrix}.
+\]
+
+\subsection*{EKF update equations}
+
+\noindent
+\begin{minipage}[t]{0.47\textwidth}
+\begin{align*}
+    \hat{\bm{x}}_{t|t-1} &= \bm{A}\hat{\bm{x}}_{t-1|t-1} 
+    + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_t + \bm{b}\right) \\
+    \bm{P}_{t|t-1}       &= \bm{A}\bm{P}_{t-1|t-1}\bm{A}^\top + \bm{Q} \\
+    \bm{S}_t             &= \bm{H}_t \bm{P}_{t|t-1} \bm{H}_t^\top
+                                + \text{diag}(\boldsymbol{\lambda}_{t|t-1}) \\
+    \bm{K}_t             &= \bm{P}_{t|t-1}\bm{H}_t^\top \bm{S}_t^{-1} \\
+    \hat{\bm{x}}_{t|t}   &= \hat{\bm{x}}_{t|t-1}
+                                + \bm{K}_t(\bm{y}_t - \boldsymbol{\lambda}_{t|t-1}) \\
+    \bm{P}_{t|t}         &= (\bm{I} - \bm{K}_t \bm{H}_t)\bm{P}_{t|t-1}
+\end{align*}
+\end{minipage}
+\hfill\vline\hfill
+\begin{minipage}[t]{0.47\textwidth}
+\begin{itemize}[leftmargin=*, itemsep=0em, topsep=0.2em]
+    \item $\hat{\bm{x}}_{t|t-1} \in \mathbb{R}^{K}$: predicted latent state mean
+    \item $\hat{\bm{x}}_{t|t} \in \mathbb{R}^{K}$: filtered latent state mean
+    \item $\bm{P}_{t|t-1} \in \mathbb{R}^{K \times K}$: predicted latent state covariance
+    \item $\bm{P}_{t|t} \in \mathbb{R}^{K \times K}$: filtered latent state covariance
+    \item $\bm{S}_t \in \mathbb{R}^{N \times N}$: innovation covariance
+    \item $\bm{K}_t \in \mathbb{R}^{K \times N}$: Kalman gain
+    \item $(\bm{y}_t - \boldsymbol{\lambda}_{t|t-1})$: innovation (residual)
+    \item $\bm{Q} \in \mathbb{R}^{K \times K}$: latent process noise covariance
+    \item $\text{diag}(\boldsymbol{\lambda}_{t|t-1})$: Poisson observation noise
+    \item $\bm{H}_t \in \mathbb{R}^{N \times K}$: locally linear approximation of emission matrix
+\end{itemize}
+\end{minipage}
+\\
+\\
+\\
+\noindent For D-optimal stim selection, we want to pick $u$ that minimizes $\mathbb{E} \left[\log \det \left( P^{BB}_{T|T} \right)\right]$, the expected filtered covariance at the end of the trial. To do that, we can just use the (augmented) EKF update equations to propagate all sources of uncertainty through to the end of the trial.\\
+
+\noindent Between the start of the trial and $t=\tau$, $\widetilde{\bm{A}}$ is block-diagonal with the identity in the $B$ block, since there is no stim. This means that our estimate of B's covariance at $t=\tau-1$ is equal to our estimate at the end of the previous trial:
+
+\[
+    \widetilde{\bm{P}}_{\tau-1|\tau-1} = \begin{bmatrix}
+    \bm{P}_{\tau-1|\tau-1} & 0\\
+    0 & \Sigma_B
+    \end{bmatrix},
+\]
+\\
+\noindent For the prediction step at $t = \tau$:
+\[
+    \widetilde{\bm{P}}_{\tau|\tau-1} = 
+    \widetilde{\bm{A}}\widetilde{\bm{P}}_{\tau-1|\tau-1}\widetilde{\bm{A}}^T + \widetilde{\bm{Q}} =
+    \begin{bmatrix}
+    A & \bm{u}^T \otimes I_K \\
+    0 & I_{KN}
+    \end{bmatrix}
+\begin{bmatrix}
+    \bm{P}_{\tau-1|\tau-1} & 0\\
+    0 & \Sigma_B
+    \end{bmatrix}
+    \begin{bmatrix}
+    A^T & 0\\
+    (\bm{u}^T \otimes I_K)^T  & I_{KN}
+        \end{bmatrix} + \widetilde{\bm{Q}}
+\] 
+\[
+= \begin{bmatrix}
+    \bm{A}\bm{\bm{P}_{\tau-1|\tau-1}}\bm{A}^T + (\bm{u}^T \otimes I_K) \Sigma_B (\bm{u}^T \otimes I_K)^T & (\bm{u}^T \otimes I_K) \Sigma_B \\
+    \Sigma_B (\bm{u}^T \otimes I_K)^T & \Sigma_B
+\end{bmatrix},
+\]
+
+\noindent which intuitively makes sense, since it means that stimulation induces cross-coupling in the covariance structure of $\bm{x}$ and $\textrm{vec}(\bm{B})$. \\
+
+Note that the prediction step doesn't actually change anything about the within-block covariance of $\textrm{vec}(\bm{B})$, since the our dynamics model doesn't evolve the values of $\textrm{vec}(\bm{B})$. Our updates to $\Sigma_B$ will come from the observed activity instead via the (augmented) filtering step:
+
+\[
+\widetilde{\bm{S}}_\tau = \widetilde{\bm{H}_\tau}\widetilde{\bm{P}}_{\tau|\tau-1}\widetilde{\bm{H_\tau}} + \text{diag}\left( \begin{bmatrix}
+    \bm{\lambda}_{\tau|\tau-1} ; \bm{0} 
+\end{bmatrix} \right),
+\quad
+\widetilde{\bm{K}}_\tau  = \widetilde{\bm{P}}_{\tau|\tau-1}\widetilde{\bm{H}}_\tau^\top \widetilde{\bm{S}}_\tau^{-1}
+\quad 
+ \widetilde{\bm{P}}_{\tau|\tau} = (\bm{I} - \widetilde{\bm{K}}_\tau \widetilde{\bm{H}}_\tau)\widetilde{\bm{P}}_{\tau|\tau-1}
+\]
+
+This makes it so that non-zero terms get pushed into the $B$ block of $\widetilde{\bm{P}}_{\tau|\tau}.$ We can just do this repeatedly until we reach the expected $\Sigma_B$ at the end of the trial, and then use that to pick a D-optimal $u$.
+
+Once we observe the observations $\bm{y}_{\tau:T}$, we can do the usual EKF forward pass + RTS smoothing to incorporate the real evidence into the estimated means and covariances of $\bm{x}$ and $\bm{B}$. The observed innovation doesn't affect the estimated covariances directly, but it does indirectly by updating the $\bm{x}$ that produce the linearizations $\bm{H_t}$.
+
+\end{document}

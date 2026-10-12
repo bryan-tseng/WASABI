@@ -6,9 +6,7 @@ the update.
 """
 
 import numpy as np
-
-from .utils import effective_stim_input
-
+from .utils import effective_stim_input, make_multistep_M
 
 def get_perturbation_agg(smoothed_means, smoothed_covs, A, Q, t0, t1):
     """Extract perturbation term (z_i) and its covariance (R_i) at the stim time bin from smoothed posteriors.
@@ -44,7 +42,7 @@ class RowRLS:
             K (int): Number of latents
             N (int): Number of stim channels
             prior_var (float, optional): Prior variance of B. Defaults to 25 times identity.
-            mean_init (_type_, optional): Initial mean. Defaults to None.
+            mean_init (_type_, optional): Initial mean of w vectors. Defaults to None.
             full_noise_cov (bool, optional): Whether to use full noise covariance. Defaults to True.
             jitter (_type_, optional): Jitter for numerical stability. Defaults to 1e-10.
         """
@@ -52,9 +50,10 @@ class RowRLS:
         # Initialization of the rows of B (W) and their covariances (Sigma)
         self.W = np.zeros((K, N)) if mean_init is None else np.array(mean_init, dtype=float)
         self.Sigma = np.stack([prior_var * np.eye(N) for _ in range(K)]) # Initialize for K rows, this is P_{n|n-1}
-
+        
         self.full_noise_cov = full_noise_cov
         self.jitter = jitter
+        
         self.history = [] # Keep track per update
 
     def _predictive_cov(self, u, R):
@@ -71,13 +70,15 @@ class RowRLS:
         """
         Su = self.Sigma @ u         # (K, N), row k is Sigma^(k) u.  or P_{n|n-1} projected onto u
         sig = Su @ u                # (K,), prior variance of w_k^T u
-        # full_noise_cov=False drops cross-latent noise correlations
+        
+        # full_noise_cov = False drops cross-latent noise correlations (i.e. diagonalize)
         Reff = np.asarray(R) if self.full_noise_cov else np.diag(np.diag(np.asarray(R)))
-        S = np.diag(sig) + Reff
+        
+        S = np.diag(sig) + Reff     # Total predictive cov of z
         return Su, sig, S
 
     def predict(self, u, R):
-        """Predicted mean of z and its prior predictive covariance."""
+        """Predicted mean of z and its predictive covariance."""
         _, _, S = self._predictive_cov(u, R)
         return self.W @ u, S
 
@@ -144,28 +145,6 @@ class RowRLS:
         return float(np.trace(self.Sigma, axis1=1, axis2=2).sum()) # gives you the sum of the traces of each row's covariance matrix
 
 
-# Adaptive selection
-def select_stim_from_set(RLS_tracker, candidate_s, V, b, R_hat, beta_stim=5.0):
-    """Pick the pattern from a fixed candidate set with the largest expected info gain.
-
-    Args:
-        RLS_tracker:
-        candidate_s (numpy.ndarray): Matrix of candidate stim patterns (M patterns, N channels)
-        V (numpy.ndarray): toeplitz matrix mapping stim channels to effective input
-        b (float): stim threshold
-        R_hat (numpy.ndarray): Noise covariance of perturbation z
-        beta_stim (float, optional): softplus param. Defaults to 5.0.
-
-    Returns:
-        j (int): Index of the selected stimulus pattern
-        s_selected (numpy.ndarray): The selected stimulus pattern
-        gains (numpy.ndarray): Info gains for all candidate patterns
-    """
-    U = effective_stim_input(np.asarray(candidate_s), V, b, beta_stim)
-    gains = np.array([RLS_tracker.info_gain(u, R_hat) for u in U])
-    best_ind = int(np.argmax(gains))
-    chosen = candidate_s[best_ind]
-    return best_ind, chosen, gains
 
 
 def select_stim_greedy(RLS_tracker, V, b, R_hat, n_channels, beta_stim=5.0, candidates=None):
@@ -237,79 +216,214 @@ def projected_error(W_est, W_true, U):
     return float(np.linalg.norm(err) / np.linalg.norm(W_true @ Pu))
 
 
-def make_multistep_M(A, horizon=None):
-    """
-    M_H = I + A + ... + A^(Tau-1).
-    horizon(Tau) =None gives M_inf = (I-A)^(-1).
-    
+def accumulated_process_noise(A, Q, horizon):
+    """Cov of the perturbation z under the full dynamics: sum_i A^i Q A^i'.
+
+    With z = x[i_post] - A^H x[i_pre], the stim term is deterministic and every
+    remaining term is process noise injected during the window, propagated by
+    however many steps are left. This is the R to hand the tracker when z comes
+    from a simulated trial rather than the analytic shortcut.
     """
     K = A.shape[0]
-
-    if horizon is None:
-        return np.linalg.solve(np.eye(K) - A, np.eye(K))
-
-    M = np.zeros_like(A)
-    A_power = np.eye(K)
-    for _ in range(horizon):
-        M += A_power
-        A_power = A_power @ A
-    return M
+    R = np.zeros((K, K))
+    for i in range(horizon):
+        Ai = np.linalg.matrix_power(A, i)
+        R += Ai @ Q @ Ai.T
+    return 0.5 * (R + R.T)
 
 
 def truncated_projector(U, energy=0.99):
-    """Projector onto the directions U actually probes, dropping numerically empty ones.
+    """"Projector onto the directions U actually probes, + the rank to reach a given energy
+        because U can only explore certain number of rank after smearing by the toeplitz kernel
 
     Args:
-        U (): _description_
-        energy (float, optional): _description_. Defaults to 0.99.
+        U (candidates): candidates of control vector (stim vector through the toeplitz and softplus)
+        energy (float, optional): energy cutoff to define the reachable directions. Defaults to 0.99.
 
     Returns:
-        _type_: _description_
+        Pu (): projector to the spanned subpsace of the control vectors
+        r (int): rank of the reachable directions of the control vectors to reach 99% energy
     """
-    _, sv, Vt = np.linalg.svd(np.asarray(U), full_matrices=False)
+    _, sv, V_trans = np.linalg.svd(np.asarray(U), full_matrices=False)
     r = int(np.searchsorted(np.cumsum(sv ** 2) / np.sum(sv ** 2), energy) + 1)
-    return Vt[:r].T @ Vt[:r], r
+    return V_trans[:r].T @ V_trans[:r], r 
 
+def make_tiling_schedule(n_cand, n_stim_ch):
+    """Deterministic scan over contiguous blocks.
+        off gives a list of offsets, j gives a list per offset
+        offsets are determined via the size of the contiguous blocks
+    """
+    if n_stim_ch & (n_stim_ch - 1) == 0: # Edge case
+        width = n_stim_ch.bit_length() - 1
+        offsets = sorted(range(n_stim_ch),
+                         key=lambda o: int(format(o, f"0{width}b")[::-1], 2))
+    else:
+        offsets = list(range(n_stim_ch))
+    return np.array([j for off in offsets
+                     for j in range(off, n_cand, n_stim_ch)], dtype=int)
 
-def run_selection(mode, n_trials, cand, U_cand, B_true, chol, R_fixed,
-                   K, N, seed, Pu, M, V, b, BETA_STIM):
+# Adaptive selection
+def select_stim_from_set(RLS_tracker, candidate_s, V, b, R_hat, beta_stim=5.0, U=None):
+    """Pick the pattern with the largest expected info gain.
+
+    Pass precomputed `U` to skip re-deriving the effective inputs each call.
     
-    rng_arm = np.random.default_rng(seed)
-    tracker = RowRLS(K, N, prior_var=25.0)
+    Args:
+        RLS_tracker:
+        candidate_s (numpy.ndarray): Matrix of candidate stim patterns (M patterns, N channels)
+        V (numpy.ndarray): toeplitz matrix mapping stim channels to effective input
+        b (float): stim threshold
+        R_hat (numpy.ndarray): Noise covariance of perturbation z
+        beta_stim (float, optional): softplus param. Defaults to 5.0.
+        U (optional): computed effective candidates
 
-    R_rls = np.linalg.solve(M, R_fixed)
-    R_rls = np.linalg.solve(M, R_rls.T).T
+    Returns:
+        best_ind (int): Index of the selected stimulus pattern
+        s_selected (numpy.ndarray): The selected stimulus pattern
+        gains (numpy.ndarray): Info gains for all candidate patterns
+    """
+    if U is None:
+        U = effective_stim_input(np.asarray(candidate_s), V, b, beta_stim)
+    gains = np.array([RLS_tracker.info_gain(u, R_hat) for u in U])
+    best_ind = int(np.argmax(gains))
+    return best_ind, candidate_s[best_ind], gains
+
+def predict_R(u, x_pre, A, B_hat, C, d, R_floor=None, jitter=1e-6, lam_max=1e3):
+    """Predicted latent-space noise covariance for stimulating with u.
+
+    Pushes the current state estimate through the dynamics and the candidate's
+    stim effect, evaluates the predicted rates, and inverts the Fisher
+    information C' diag(lam) C. Higher rates give a tighter readout.
+    """
+    K = len(x_pre)
+    x_post = A @ x_pre + B_hat @ u
+    lam = np.clip(np.exp(C @ x_post + d), 1e-8, lam_max)
+    J = C.T @ (lam[:, None] * C)                    # diag(lam) @ C, no K x K temporary
+    R = np.linalg.inv(J + jitter * np.eye(K))
+    if R_floor is not None:
+        R = R + R_floor                             # process noise the readout can't beat
+    return 0.5 * (R + R.T)
+
+def run_selection(mode, n_trials, s_cand, B_true, R_fixed, K, N, Pu, M, V, b,
+                  BETA_STIM, n_stim_ch=None, seed=1, prior_var=25.0,
+                  full_noise_cov=True, snap_at=(),
+                  A=None, C=None, d=None, R_floor=None, Q_state=None,
+                  trial_sim=None):
+    """Run one simulated stim-selection experiment and track the posterior over B.
+    
+    Each trial picks a stim pattern from the candidate set according to `mode`,
+    simulates the multi-step perturbation z = M * B * u + eps, maps it back to 
+    M^-1 z, and updates the RowRLS tracker. Error is projected measured to the subspace 
+    the candidate set can excite (via `Pu`), since the complement is in the null space of possible stims.
+
+    In "D_opt_R" the noise model is rate-dependent and estimation is fully
+    separated from generation (most faithful): the simulator draws noise using B_true and the
+    true state x, while scoring and updating use tracker.W and the propagated
+    estimate x_hat. A, C, d are shared (which you get from fitted PLDS).
+    
+    Args:
+        mode (str): Selection rule. "D_opt, tile or random"
+        n_trials (int): Number of stim trials to run.
+        s_cand (np.ndarray): (n_cand, N) binary candidate stim patterns.
+        B_true (np.ndarray): (K, N) ground-truth stim-to-latent mapping.
+        R_fixed (np.ndarray): (K, K) latent noise covariance on the multi-step observation z.
+        K (int): Number of latents.
+        N (int): Number of stim channels.
+        Pu (np.ndarray): (N, N) orthogonal projector onto the directions the
+            candidate set actually probes.
+        M (np.ndarray): (K, K) multi-step propagator I + A + ... + A^(H-1).
+        V (np.ndarray): (N, N) Toeplitz spatial spread matrix, used to score
+            candidates in "D_opt" mode.
+        b (float): Threshold in the softplus stim nonlinearity.
+        BETA_STIM (float): Softplus sharpness for the stim path.
+        n_stim_ch (int, optional): Active channels per pattern, for the "tile" schedule.
+        seed (int): Seed for the arm-selection and noise generator.
+        trial_sim (callable, optional): f(s_row) -> z. When given, the perturbation
+            comes from this instead of the analytic z = M B u + eps, so the loop
+            runs on full simulated trials. Pass R_fixed = accumulated_process_noise(
+            A, Q, horizon) so the tracker's noise model matches.
+
+    Raises:
+        ValueError: If `mode` is not one of "D_opt", "tile", or "random".
+
+    Returns:
+        errs (np.ndarray): (n_trials,) relative error of W against B_true on the
+            probed subspace, after each update.
+        logdets (np.ndarray): (n_trials,) sum over rows of log det Sigma^(k).
+        selected_cand_ind (np.ndarray): (n_trials,) index into `s_cand` per trial.
+        tracker (RowRLS): The tracker at its final state.
+        snaps: maps each trial count in `snap_at` to a copy of tracker.W at that point.
+    """
+    if mode not in ("D_opt", "D_opt_R", "tile", "random"):
+        raise ValueError(f"unknown mode {mode!r}")
+    if mode == "D_opt_R" and any(v is None for v in (A, C, d)):
+        raise ValueError("D_opt_R needs A, C, d")
+    if mode == "tile" and n_stim_ch is None:
+        n_stim_ch = int(round(s_cand[0].sum()))
+
+    rng_arm = np.random.default_rng(seed)
+    tracker = RowRLS(K, N, prior_var=prior_var, full_noise_cov=full_noise_cov)
+
+    U_cand = effective_stim_input(s_cand, V, b, BETA_STIM)
+    M_inv = np.linalg.inv(M)
+    R_multistep = M_inv @ R_fixed @ M_inv.T
+    R_multistep = 0.5 * (R_multistep + R_multistep.T)
+    chol_fixed = np.linalg.cholesky(R_fixed)
+    schedule = make_tiling_schedule(len(s_cand), n_stim_ch) if mode == "tile" else None
+
+    x_true = np.zeros(K)  # generative state, simulator only
+    x_hat = np.zeros(K)   # propagated estimate, tracker only
+    chol_Q = np.linalg.cholesky(Q_state) if Q_state is not None else None
 
     denom = np.linalg.norm(B_true @ Pu)
-    errs, logdets, selected_j = [], [], []
+    errs, logdets, selected_cand_ind, snaps = [], [], [], {}
 
-    for _ in range(n_trials):
+    for i in range(n_trials):
         if mode == "D_opt":
-            j, _, _ = select_stim_from_set(
-                tracker, cand, V, b, R_rls, BETA_STIM
-            )
-        elif mode == "A_opt":
-            j, _, _ = select_stim_from_set(
-                tracker, cand, V, b, R_rls, BETA_STIM
-            )
+            cand_ind, _, _ = select_stim_from_set(
+                tracker, s_cand, V, b, R_multistep, BETA_STIM, U=U_cand)
+        elif mode == "D_opt_R":
+            gains = np.array([
+                tracker.info_gain(
+                    u, M_inv @ predict_R(u, x_hat, A, tracker.W, C, d, R_floor) @ M_inv.T)
+                for u in U_cand
+            ])
+            cand_ind = int(gains.argmax())
         elif mode == "tile":
-            j, _, _ = select_stim_from_set(
-                tracker, cand, V, b, R_rls, BETA_STIM
-            )
+            cand_ind = int(schedule[i % len(schedule)])
         else:
-            j = int(rng_arm.integers(0, len(cand)))
+            cand_ind = int(rng_arm.integers(0, len(s_cand)))
 
-        u = U_cand[j]
+        u = U_cand[cand_ind]
 
-        z = M @ B_true @ u + chol @ rng_arm.standard_normal(K)
-        z_rls = np.linalg.solve(M, z)
+        if mode == "D_opt_R":
+            # Generation: true mapping, true state, noise on the M-step observation
+            R_true = predict_R(u, x_true, A, B_true, C, d, R_floor)
+            z = M @ (B_true @ u) + np.linalg.cholesky(R_true) @ rng_arm.standard_normal(K)
+            # Inference: estimated mapping and state, same M^-1 transform as the fixed path
+            R_hat = predict_R(u, x_hat, A, tracker.W, C, d, R_floor)
+            R_hat_ms = M_inv @ R_hat @ M_inv.T
+            R_hat_ms = 0.5 * (R_hat_ms + R_hat_ms.T)
+            tracker.update(u, M_inv @ z, R_hat_ms)
+            x_true = A @ x_true + B_true @ u
+            if chol_Q is not None:
+                x_true = x_true + chol_Q @ rng_arm.standard_normal(K)
+            x_hat = A @ x_hat + tracker.W @ u
+        else:
+            if trial_sim is not None:
+                # Full dynamics: z comes from an actual simulated trial, so the
+                # pre-stim state and noise are whatever the PLDS produced.
+                z = trial_sim(s_cand[cand_ind])
+            else:
+                z = M @ (B_true @ u) + chol_fixed @ rng_arm.standard_normal(K)
+            tracker.update(u, M_inv @ z, R_multistep)
 
-        tracker.update(u, z_rls, R_rls)
-
-        errs.append(
-            np.linalg.norm((tracker.W - B_true) @ Pu) / denom
-        )
+        errs.append(np.linalg.norm((tracker.W - B_true) @ Pu) / denom)
         logdets.append(tracker.logdet())
-        selected_j.append(j)
+        selected_cand_ind.append(cand_ind)
+        if (i + 1) in snap_at:
+            snaps[i + 1] = tracker.W.copy()
 
-    return np.array(errs), np.array(logdets), np.array(selected_j), tracker
+    nis = np.array([h["nis"] for h in tracker.history])
+    return (np.array(errs), np.array(logdets),
+            np.array(selected_cand_ind), tracker, snaps, nis)

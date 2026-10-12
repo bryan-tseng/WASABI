@@ -34,13 +34,14 @@ We will focus on (2) first, with fixed continuous stimulation parameters (e.g., 
 To develop a method for adaptive stimulation that iteratively identifies the most informative stimulation sites. The dynamics of the reach is modeled using a linear-Poisson model , using a weighted linear-Poisson model to identify the most informative stimulation sites and improve the accuracy of the model.
 
 \subsection*{Dynamics model}
-We model stimulation as a perturbation to a latent dynamical system through the mapping $\bm{B}$. Specifically, we model the system using a Poisson linear dynamical system (PLDS), which combines firing rate estimation with dimensionality reduction. We assume linear, Markovian (AR(1)) state evolution, Poisson emissions, and stationary $\bm{A}$. Eventually, we can have a Kalman-like update to allow for nonstationarity in $\bm{C}$\phantomsection\label{sec:nonstationarity} and a compositional model for $\bm{A}$ \phantomsection\label{sec:compositional_model}.
+We model stimulation as a perturbation to a latent dynamical system through the mapping $\bm{B}$. Specifically, we model the system using a Poisson linear dynamical system (PLDS), which combines firing rate estimation with dimensionality reduction. We assume linear, Markovian (AR(1)) state evolution, Poisson emissions, and stationary $\bm{A}$. Eventually, we can have a Kalman-like update to allow for nonstationarity in $\bm{C}$\phantomsection\label{sec:nonstationarity} and a compositional model for $\bm{A}$
+\phantomsection\label{sec:compositional_model}.
 
 \subsubsection*{State space equation}
 \vspace{-0.8cm}
 \begin{align*}
-    \bm{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
-    \bm{x}_t &= \bm{A}\bm{x}_{t-1} + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_{t_{stim}} + \bm{b}\right) + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
+    \bm{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0), \qquad\qquad \bm{u} = \text{softplus}\!\left(\bm{V}\bm{s}_{t_{stim}} + \bm{b}\right) \\
+    \bm{x}_{t+1} &= \bm{A}\bm{x}_t + \bm{B}\bm{u}_t + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
     \bm{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\bm{C}\bm{x}_t + \bm{d}\right)\right)
 \end{align*}
 \vspace{-0.3cm}
@@ -88,7 +89,7 @@ We model stimulation as a perturbation to a latent dynamical system through the 
     \item $\bm{d} \in \mathbb{R}^{N}$: per-channel mean log-firing rate
     \item $\bm{Q} \in \mathbb{R}^{K \times K}$: latent process noise covariance
     \item $\bm{\mu}_0 \in \mathbb{R}^K$, $\boldsymbol{\Sigma}_0 \in \mathbb{R}^{K \times K}$: initial state mean and covariance
-    \item $\bm{\theta} = \{\bm{A}, \bm{B}, \bm{b}, \bm{C}, \bm{d}, \bm{Q}, \boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0\}$: full parameter set
+    \item $\bm{\theta} = \{\bm{A, B, b, C, d, Q, \mu_0, \Sigma_0}\}$: full parameter set
 \end{itemize}
 \end{minipage}
 \[
@@ -102,8 +103,27 @@ We model stimulation as a perturbation to a latent dynamical system through the 
 % B: 15 \times 8
 % C: 128 \times 15
 % D: 128 \times 29
-
 \section*{Overview}
+\begin{enumerate}
+    \item \textbf{Control trials}: Primate performs control reaches to the target
+    \begin{enumerate}
+        \item Fit the Poisson linear dynamical system (PLDS) using Extended Kalman Filter EKF to the control reaches to obtain $\hat{\bm{\theta}}_{\mathrm{ctrl}}$
+    \end{enumerate}
+    \item \textbf{Stim trials}:
+    \begin{enumerate}
+        \item \textbf{Model fitting}: Between each trial, we fit the spike counts $\{\bm{y}_{i,1:T}\}$ to the model using the EKF + RTS smoothing to get $\{\hat{\bm{x}}_{i,1:T}, \bm{P}_{i,1:T}\}$. We also get updated parameters $\hat{\bm{\theta}}_{\mathrm{i}} \leftarrow \hat{\bm{\theta}}_{\mathrm{i-1}}$
+        \item At the first trial, we have no information about stim-to-latent mapping, so the first stimulation sites are chosen at random.
+    \end{enumerate}
+    \item \textbf{Acquisition:}
+    \begin{enumerate}
+        \item \textbf{Recursive least squares}: Using RLS to track $\hat{\bm{B}}_i$ and $\boldsymbol{\hat\Sigma}_{B_{i|i}}$ gives us an estimate of the covariance in the stim-to-latent mapping.
+        \item \textbf{Stim selection}: Choose the next stimulation $\bm{s}_{i+1}$ using the covariance estimate of $\hat{\bm{B}}_{i+1|i}$ ($\hat{\bm{\Sigma}}_{B_{i+1|i}}$)
+    \end{enumerate}
+    \item Perform the next stimulation and repeat 2-3.
+\end{enumerate}
+
+\clearpage
+\section*{Long overview}
 \begin{enumerate}
     \item \textbf{Control trials}: Monkey performs control reaches to the target
     \item We fit the PLDS to the control reaches to obtain $\hat{\bm{A}}_{\mathrm{ctrl}}, \hat{\bm{C}}_{\mathrm{ctrl}}, \hat{\bm{d}}_{\mathrm{ctrl}}, \hat{\bm{Q}}_{\mathrm{ctrl}}$
@@ -116,7 +136,11 @@ We model stimulation as a perturbation to a latent dynamical system through the 
     \begin{enumerate}
         \item The previous trial would "warm-start" the convergence of the next trial, so we only need to run a few iterations of EKF and SGD between each trial to get a converging estimate of the parameters.
     \end{enumerate}
-    \item \hyperref[sec:acquisition]{\textbf{Acquisition:}} Choose the next stimulation site $\bm{s}_{i+1}$ using the covariance estimate of $\hat{\bm{B}}_{i|i}$ ($\hat{\bm{\Sigma}}_{B_{i|i}}$), which is the uncertainty in the stim-to-latent mapping after trial $i$.
+    \item \textbf{Acquisition:}
+    \begin{enumerate}
+        \item \hyperref[sec:RLS]{\textbf{Recursive least squares}}: Using RLS to track $\hat{\bm{B}}_i$ and $\boldsymbol{\hat\Sigma}_{B_{i|i}}$ gives us an estimate of the covariance in the stim-to-latent mapping. This step uses $\hat{\bm{A}}_i, \hat{\bm{Q}}_i, \hat{\bm{x}}_{i,t|T}, \bm{P}_{i,t|T}$, and $\hat{\bm{d}}_i$ estimated from  steps 4.
+        \item \hyperref[sec:stim_selection]{\textbf{Stim selection}}: Choose the next stimulation $\bm{s}_{i+1}$ using the covariance estimate of $\hat{\bm{B}}_{i+1|i}$ ($\hat{\bm{\Sigma}}_{B_{i+1|i}}$), which is the uncertainty in the stim-to-latent mapping after trial $i+1$ after a given stimulation.
+    \end{enumerate}
     \item Perform the next stimulation and repeat 3-5.
 \end{enumerate}
 
@@ -126,13 +150,14 @@ We model stimulation as a perturbation to a latent dynamical system through the 
 \subsection*{State-space equation (PLDS)}
 \vspace{-0.5cm}
 \begin{align*}
-    \bm{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
-    \bm{x}_t &= \bm{A}\bm{x}_{t-1} + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_{t_{stim}} + \bm{b}\right) + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
+    \bm{x}_0 &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0)\\
+    \bm{u} &= \text{softplus}\!\left(\bm{V}\bm{s}_{t_{stim}} + \bm{b}\right) \\
+    \bm{x}_{t+1} &= \bm{A}\bm{x}_t + \bm{B}\bm{u}_t + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
     \bm{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\bm{C}\bm{x}_t + \bm{d}\right)\right)
 \end{align*}
 \vspace{-0.3cm}
 
-We denote two distinct indices throughout: Ex: for $\bm{A}_{t, i}$
+We denote two distinct indices throughout: Ex: for $\bm{A}_{i, t}$
 \begin{itemize}
     \item $i = 1, 2, \ldots$ indexes \emph{trials}
     \item $t = 1, \ldots, T$ indexes \emph{within-trial timesteps}
@@ -147,11 +172,11 @@ the initial model parameters (and spike detection templates).
 \textbf{Control trial initialization} ($i = 0$)\\[0.5em]
 Initialize and fit PLDS on control trials:
 \begin{align*}
-    \hat{\bm{A}}_{\mathrm{ctrl}} &= \bm{I}_K \\
-    \hat{\bm{C}}_{\mathrm{ctrl}} &\sim \mathcal{N}(\bm{0},\, \sigma_C^2\,\bm{I}_{N \times K}) \\
-    \hat{\bm{d}}_{\mathrm{ctrl}} &= \log\bar{\bm{y}}_{\mathrm{ctrl}} \\
-    \hat{\boldsymbol{\mu}}_{0} &= \bm{0}_K \\
-    \hat{\boldsymbol{\Sigma}}_{0} &= \bm{I}_K
+    \bm{A}_{0, \mathrm{ctrl}} &= \bm{I}_K \\
+    \bm{C}_{0, \mathrm{ctrl}} &\sim \mathcal{N}(\bm{0},\, \sigma_C^2\,\bm{I}_{N \times K}) \\
+    \bm{d}_{0, \mathrm{ctrl}} &= \log\bar{\bm{y}}_{0, \mathrm{ctrl}} \\
+    \boldsymbol{\mu}_{0, \mathrm{ctrl}} &= \bm{0}_K \\
+    \boldsymbol{\Sigma}_{0, \mathrm{ctrl}} &= \bm{I}_K \\
 \end{align*}
 $\Downarrow$ fit on control data
 \begin{align*}
@@ -165,22 +190,23 @@ Warm start with fitted control parameters:
 \begin{align*}
     \hat{\bm{A}}_1 &= \hat{\bm{A}}_{\mathrm{ctrl}} \\
     \hat{\bm{C}}_1 &= \hat{\bm{C}}_{\mathrm{ctrl}} \\
-    \hat{\bm{d}}_1 &= \hat{\bm{d}}_{\mathrm{ctrl}}
+    \hat{\bm{d}}_1 &= \log\bar{\bm{y}}_{1}
 \end{align*}
-$\hat{\bm{B}}_{0|0}$ and $\hat{\bm{\Sigma}}_{B_{0|0}}$ initialized via:
+Stim parameters are initialized via:
 \begin{align*}
     \hat{\bm{B}}_{0|0} &= \bm{0}_{K \times N} \\
-    \hat{\bm{\Sigma}}_{B_{0|0}} &= \sigma_B^2\,\bm{I} \\
+    \hat{\bm{\Sigma}}_{B_{0|0}}^{(k)} &= \sigma_k^2\,\bm{I}_N \\
     \hat{\bm{b}}_{0|0} &= \bm{0}_K
 \end{align*}
 \end{minipage}
 
 \noindent where:
+
 \begin{itemize}[itemsep=0em, topsep=0.2em]
-    \item $\sigma_B^2$: controls prior uncertainty over the stim-to-latent mapping
+    \item $\sigma_k^2$: prior uncertainty over row $k$ of the stim-to-latent mapping; set $\sigma_k^2 = \sigma_B^2$ for all $k$ to recover a single shared scale
     \item $\sigma_C^2$: controls prior uncertainty over the latent-to-observation mapping
     \item $\bar{\bm{y}}_{\mathrm{ctrl}}$: mean spike count from control trials
-    \item $\hat{\bm{\Sigma}}_{B_{0|0}} = \sigma_B^2\,\bm{I}$ (spherical prior) means $\bm{s}_1$ is chosen at random
+    \item a spherical prior on each row means $\bm{s}_1$ is chosen at random
 \end{itemize}
 \vspace{0.5cm}
 \textbf{Stim trial initialization ($i \geq 2$)} uses the previous trial's fitted parameters $\hat{\boldsymbol{\theta}}_{i-1}$ as the prior for the next trial.
@@ -196,29 +222,29 @@ The marginal likelihood of the latent trajectory is:
         &= \log \int p(\bm{y}_{1:T} \mid \bm{x}_{1:T};\boldsymbol{\theta})\,
                        p(\bm{x}_{1:T};\boldsymbol{\theta})\, d\bm{x}_{1:T}\\
 \bm{y}_t &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\bm{C}\bm{x}_t + \bm{d}\right)\right)\\
-\boldsymbol{\theta} &= \{\bm{A, B, C, d, \mu_0, \Sigma_0}\}
+\boldsymbol{\theta} &= \{\bm{A, B, b, C, d, Q, \mu_0, \Sigma_0}\}
 \end{align*}
 
 Because the Poisson emission $p(\bm{y}_{1:t} \mid \bm{x}_{1:t};\boldsymbol{\theta})$
-is non-Gaussian, the integral is intractable. At time $t-1$, we need to approximate it by linearizing the emission around $\hat{\bm{x}}_{t|t-1}$, the current filtered mean (latent state), yielding a Gaussian approximation to the predictive distribution
+is non-Gaussian, the integral is intractable. At time $t$, we need to approximate it by linearizing the emission around $\hat{\bm{x}}_{t+1|t}$, the current filtered mean (latent state), yielding a Gaussian approximation to the predictive distribution
 \begin{align*}
-    p(\bm{y}_t \mid \bm{y}_{1:t-1};\boldsymbol{\theta})
-        \approx \mathcal{N}(\boldsymbol{\lambda}_{t|t-1},\, \bm{S}_t), \qquad
-    \boldsymbol{\lambda}_{t|t-1} = \text{softplus}\!\left(\bm{C}\hat{\bm{x}}_{t|t-1} + \bm{d}\right)
+    p(\bm{y}_t \mid \bm{y}_{1:t};\boldsymbol{\theta})
+        \approx \mathcal{N}(\boldsymbol{\lambda}_{t+1|t},\, \bm{S}_t), \qquad
+    \boldsymbol{\lambda}_{t+1|t} = \text{softplus}\!\left(\bm{C}\hat{\bm{x}}_{t+1|t} + \bm{d}\right)
 \end{align*}
 where $\bm{S}_t$ is the estimated covariance.
 \begin{align*}
     \mathcal{L}(\boldsymbol{\theta})
         \approx \sum_{t=1}^{T} \log \mathcal{N}(\bm{y}_t|\,
-                \boldsymbol{\lambda}_{t|t-1},\, \bm{S}_t)
+                \boldsymbol{\lambda}_{t+1|t},\, \bm{S}_t)
 \end{align*}
 
 \subsection*{Emission Jacobian}
 In the EKF formulation, we approximate the observation operator $\bm{H}_t$ with the Emission Jacobian described here:
-For $\boldsymbol{\lambda}_t = \text{softplus}(\bm{C}\bm{\hat{x}}_t + \bm{d})$, we have the Jacobian (log-rate with respect to the latent state) is:
+For $\boldsymbol{\lambda}_t = \text{softplus}(\bm{C}\hat{\bm{x}}_t + \bm{d})$, we have the Jacobian (log-rate with respect to the latent state) is:
 \begin{align*}
-    \bm{H}_t &= \frac{\partial \boldsymbol{\lambda}_t}{\partial \bm{x}_t}\Bigg|_{\bm{\hat{x}}_t}
-                 = \text{diag}(\sigma(\bm{C}\bm{\hat{x}}_t + \bm{d}))\,\bm{C}
+    \bm{H}_t &= \frac{\partial \boldsymbol{\lambda}_t}{\partial \bm{x}_t}\Bigg|_{\hat{\bm{x}}_t}
+                 = \text{diag}(\sigma(\bm{C}\hat{\bm{x}}_t + \bm{d}))\,\bm{C}
                  \in \mathbb{R}^{N \times K}
 \end{align*}
 where $\sigma(\cdot)$ is the sigmoid function (derivative of softplus). We calculate the Emission Jacobian $\bm{H}_t$ to linearize the non-Gaussian Poisson emission and plug into the Kalman equations. This propagates the Gaussian estimations of latent states $\bm{x}_t$ one time step forward each, which we can plug in the Kalman equations.
@@ -226,13 +252,13 @@ where $\sigma(\cdot)$ is the sigmoid function (derivative of softplus). We calcu
 \noindent
 \begin{minipage}[t]{0.47\textwidth}
 \begin{align*}
-    \bm{\hat{x}}_{t|t-1} &= \bm{A}\bm{\hat{x}}_{t-1|t-1} 
-    + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_t + \bm{b}\right) \\
+    \hat{\bm{x}}_{t|t-1} &= \bm{A}\hat{\bm{x}}_{t-1|t-1} 
+    + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_{t-1} + \bm{b}\right) \\
     \bm{P}_{t|t-1}       &= \bm{A}\bm{P}_{t-1|t-1}\bm{A}^\top + \bm{Q} \\
     \bm{S}_t             &= \bm{H}_t \bm{P}_{t|t-1} \bm{H}_t^\top
                                 + \text{diag}(\boldsymbol{\lambda}_{t|t-1}) \\
     \bm{K}_t             &= \bm{P}_{t|t-1}\bm{H}_t^\top \bm{S}_t^{-1} \\
-    \bm{\hat{x}}_{t|t}   &= \bm{\hat{x}}_{t|t-1}
+    \hat{\bm{x}}_{t|t}   &= \hat{\bm{x}}_{t|t-1}
                                 + \bm{K}_t(\bm{y}_t - \boldsymbol{\lambda}_{t|t-1}) \\
     \bm{P}_{t|t}         &= (\bm{I} - \bm{K}_t \bm{H}_t)\bm{P}_{t|t-1}
 \end{align*}
@@ -240,8 +266,8 @@ where $\sigma(\cdot)$ is the sigmoid function (derivative of softplus). We calcu
 \hfill\vline\hfill
 \begin{minipage}[t]{0.47\textwidth}
 \begin{itemize}[leftmargin=*, itemsep=0em, topsep=0.2em]
-    \item $\bm{\hat{x}}_{t|t-1} \in \mathbb{R}^{K}$: predicted latent state mean
-    \item $\bm{\hat{x}}_{t|t} \in \mathbb{R}^{K}$: filtered latent state mean
+    \item $\hat{\bm{x}}_{t|t-1} \in \mathbb{R}^{K}$: predicted latent state mean
+    \item $\hat{\bm{x}}_{t|t} \in \mathbb{R}^{K}$: filtered latent state mean
     \item $\bm{P}_{t|t-1} \in \mathbb{R}^{K \times K}$: predicted latent state covariance
     \item $\bm{P}_{t|t} \in \mathbb{R}^{K \times K}$: filtered latent state covariance
     \item $\bm{S}_t \in \mathbb{R}^{N \times N}$: innovation covariance
@@ -258,22 +284,18 @@ where $\sigma(\cdot)$ is the sigmoid function (derivative of softplus). We calcu
 \subsection*{Offline parameter update (Outline)}
 At the end of each trial $i$, the following steps are performed in order:
 \begin{enumerate}
-    \item ``E step" \textbf{EKF forward pass + RTS smoother}:
-    Run the EKF forward over $\bm{y}_{i,1:T}$ with $\hat{\boldsymbol{\theta}}_{i-1}$ fixed, then run the RTS smoother backward to get filtered means and covariances $\{\bm{\hat{x}}_{i,1:T},\, \bm{P}_{i,1:T}\}$. $\{\bm{\hat{x}}_{i,t|t},\, \bm{P}_{i,t|t}\}_{t=1}^{T}$ is the lag-one cross-covariance needed for the M-steps below.
-    \item ``M step" \textbf{Factorized estimation of parameters}: \phantomsection\label{sec:factorized_estimation} We factorize the estimation of parameters to get point estimates of parameters with no closed form ($\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$, $\hat{\bm{b}}_i$), but still getting covaraince estimates for those that we can using EM. This also keeps the \href{https://probml.github.io/dynamax/notebooks/hmm/casino_hmm_learning.html#compare-the-learning-algorithms}{faster convergence rate of the EM algorithm}.
+    \item ``E step'' \textbf{EKF forward pass + RTS smoother}:
+    Run the EKF forward over $\bm{y}_{i,1:T}$ with $\hat{\bm{\theta}}_{i-1}$ fixed, then run the RTS smoother backward to get filtered means and covariances $\{\hat{\bm{x}}_{i,1:T},\, \bm{P}_{i,1:T}\}$. $\{\hat{\bm{x}}_{i,t|t},\, \bm{P}_{i,t|t}\}_{t=1}^{T}$ is the lag-one cross-covariance needed for the M-steps below.
+    \item ``M step'' \textbf{Factorized estimation of parameters}: \phantomsection\label{sec:factorized_estimation} We factorize the estimation of parameters to get point estimates of parameters with no closed form ($\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$, $\hat{\bm{b}}_i$), but still getting covariance estimates for those that we can using EM. This also keeps the \href{https://probml.github.io/dynamax/notebooks/hmm/casino_hmm_learning.html#compare-the-learning-algorithms}{faster convergence rate of the EM algorithm}.
     \begin{enumerate}
-        \item \hyperref[sec:closed_form_update]{\textbf{Closed-form update $\hat{\bm{A}}_i$, $\hat{\bm{Q}}_i$}}
-        \item \hyperref[sec:sgd_parameter_update]{\textbf{SGD update $\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$, $\hat{\bm{b}}_i$}}
+        \item \hyperref[sec:sgd_parameter_update]{\textbf{SGD update $\hat{\bm{\theta}}_i$}}
             Take one gradient step on the single-trial EKF marginal log-likelihood
             $\mathcal{L}_i = \sum_{t=1}^{T} \log\mathcal{N}(\bm{y}_{i,t} \mid
             \boldsymbol{\lambda}_{i,t|t-1}, \bm{S}_{i,t})$:
             \begin{align*}
-                (\hat{\bm{C}}_i,\, \hat{\bm{d}}_i)
-                    \leftarrow (\hat{\bm{C}}_{i-1},\, \hat{\bm{d}}_{i-1})
-                    - \eta_i\, \nabla_{\bm{C},\bm{d}}\,
+                \hat{\bm{\theta}}_i \leftarrow \hat{\bm{\theta}}_{i-1} - \eta_i\, \nabla_{\bm{C},\bm{d}}\,
                     \bigl[-\mathcal{L}_i(\hat{\boldsymbol{\theta}}_{i-1})\bigr]
             \end{align*}
-        \item \hyperref[sec:update_B_and_Sigma_B]{\textbf{Update $\hat{\bm{B}}_i$} and $\boldsymbol{\hat\Sigma}_{B_{i|i}}$:} Using the updated $\hat{\bm{A}}_i$, $\hat{\bm{Q}}_i$, $\hat{\bm{C}}_i$, and $\hat{\bm{d}}_i$ from steps 2-3, we update $\hat{\bm{B}}_i$ and get $\boldsymbol{\hat\Sigma}_{B_{i|i}}$
     \end{enumerate}
     \item \textbf{Repeat 1 and 2 until convergence}:
     \begin{enumerate}
@@ -299,70 +321,10 @@ The EKF forward pass is identical to the online version.
                                 + \bm{G}_t\!\left(\bm{P}_{t+1|T} - \bm{P}_{t+1|t}\right)\bm{G}_t^\top
 \end{align*}
 initialized at $\hat{\bm{x}}_{T|T}$, $\bm{P}_{T|T}$ and run backward for $t = T-1, \ldots, 1$.
-\subsection*{EM closed-form update $\hat{\bm{A}}_i$, $\hat{\bm{Q}}_i$}
-\phantomsection\label{sec:closed_form_update}
-Given the RTS-smoothed statistics $\{\hat{\bm{x}}_{i,t|T},\, \bm{P}_{i,t|T},\, \bm{P}_{i,t,t-1|T}\}_{t=1}^{T}$
-from the E step, $\hat{\bm{A}}_i$ and $\hat{\bm{Q}}_i$ admit closed-form M-step updates
-identical to those of a standard linear-Gaussian LDS, since the state transition
-\begin{align*}
-    \bm{x}_{i,t} = \bm{A}\bm{x}_{i,t-1} + \bm{B}\,\text{softplus}\!\left(\bm{V}\bm{s}_{i,t} + \bm{b}\right) + \boldsymbol{\epsilon}_t
-\end{align*}
-is linear-Gaussian in $\bm{x}_{i,t}$ given the (currently fixed) stimulation input. Only the
-emission $\bm{y}_{i,t} \mid \bm{x}_{i,t}$ is non-Gaussian, so it does not enter this update.
 
-\paragraph{Expected complete-data log-likelihood.}
-The terms of the complete-data log-likelihood involving $\bm{A}$, $\bm{Q}$ are
-\begin{align*}
-    \mathbb{E}\!\left[\log p(\bm{x}_{i,1:T})\right]
-        \;\dot=\; -\frac{1}{2}\sum_{t=2}^{T}
-            \mathbb{E}\!\left[
-                \left(\bm{x}_{i,t} - \bm{A}\bm{x}_{i,t-1}\right)^\top
-                \bm{Q}^{-1}
-                \left(\bm{x}_{i,t} - \bm{A}\bm{x}_{i,t-1}\right)
-            \right]
-        - \frac{T-1}{2}\log\det\bm{Q}
-\end{align*}
-where the expectation is taken under the smoothing posterior $p(\bm{x}_{i,1:T} \mid \bm{y}_{i,1:T}, \hat{\boldsymbol{\theta}}_{i-1})$,
-and $\dot=$ denotes equality up to additive constants independent of $\bm{A}, \bm{Q}$.
-
-\paragraph{Sufficient statistics.}
-Define the smoothed second-moment sums
-\begin{align*}
-    \bm{S}_{xx}     &= \sum_{t=2}^{T}\left(\bm{P}_{i,t-1|T} + \hat{\bm{x}}_{i,t-1|T}\hat{\bm{x}}_{i,t-1|T}^\top\right) \\
-    \bm{S}_{x'x}    &= \sum_{t=2}^{T}\left(\bm{P}_{i,t,t-1|T} + \hat{\bm{x}}_{i,t|T}\hat{\bm{x}}_{i,t-1|T}^\top\right) \\
-    \bm{S}_{x'x'}   &= \sum_{t=2}^{T}\left(\bm{P}_{i,t|T} + \hat{\bm{x}}_{i,t|T}\hat{\bm{x}}_{i,t|T}^\top\right)
-\end{align*}
-where $\bm{S}_{xx}$ uses the "earlier" timestep $t-1$ on both sides, $\bm{S}_{x'x}$ pairs the
-"later" timestep $t$ with the earlier $t-1$, and $\bm{P}_{i,t,t-1|T}$ is the lag-one
-smoothed cross-covariance from the RTS backward pass above.
-
-\paragraph{M-step.}
-Maximizing the expected complete-data log-likelihood with respect to $\bm{A}$ gives a
-weighted least-squares solution; setting the gradient to zero yields
-\begin{align*}
-    \hat{\bm{A}}_i \leftarrow \bm{S}_{x'x}\,\bm{S}_{xx}^{-1}
-\end{align*}
-Substituting $\hat{\bm{A}}_i$ back in and maximizing with respect to $\bm{Q}$ gives the
-residual covariance
-\begin{align*}
-    \hat{\bm{Q}}_i \leftarrow \frac{1}{T-1}\left(
-        \bm{S}_{x'x'} - \hat{\bm{A}}_i\,\bm{S}_{x'x}^\top
-    \right)
-\end{align*}
-which is symmetrized in practice as $\frac{1}{2}(\hat{\bm{Q}}_i + \hat{\bm{Q}}_i^\top)$ to
-guard against numerical asymmetry.
-
-\noindent
-\textbf{Stim-trial caveat.} If a stimulation pulse falls inside the window $[2,T]$, the
-transition $\bm{x}_{i,t_{\mathrm{stim}}} = \bm{A}\bm{x}_{i,t_{\mathrm{stim}}-1} + \bm{B}\,\bm{u}_{i,t_{\mathrm{stim}}} + \boldsymbol{\epsilon}_t$
-is no longer purely autonomous, so including $t = t_{\mathrm{stim}}$ in $\bm{S}_{xx}, \bm{S}_{x'x}, \bm{S}_{x'x'}$
-would bias $\hat{\bm{A}}_i$ toward absorbing the stim kick. The online, per-trial version of this
-update (see \hyperref[sec:acquisition]{Online update loop}) therefore excludes $t = t_{\mathrm{stim}}$
-from all three sums; the general form above is the version used when fitting on stim-free
-control data ($\hat{\bm{A}}_{\mathrm{ctrl}}$, $\hat{\bm{Q}}_{\mathrm{ctrl}}$).
-\subsection*{SGD parameter update $\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$, $\hat{\bm{b}}_i$}
+\subsection*{SGD parameter update $\hat{\bm{\theta}}_i$}
 \phantomsection\label{sec:sgd_parameter_update}
-Parameters related to the Poisson observation equation ($\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$) and the stim-to-latent threshold ($\hat{\bm{b}}_i$) are updated by differentiating through the EKF pass:
+Parameters related to the Poisson observation equation ($\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$) and the stim-to-latent threshold ($\hat{\bm{b}}_i$) have no closed form. So, we made a design choice to update the parameter set by using SGD and autodiff through the posterior:
 \begin{align*}
     \boldsymbol{\theta}^{(\tau+1)}
         &= \boldsymbol{\theta}^{(\tau)}
@@ -379,55 +341,25 @@ where $\eta_\tau$ is the effective learning rate defined by the Adam optimizer. 
                          + (1-\beta_2)\,\nabla_{\boldsymbol{\theta}}
                          \bigl[-\mathcal{L}(\boldsymbol{\theta}^{(\tau)})\bigr]^2
                          \tag{RMSprop} \\
-    \bm{\hat{m}}_{\tau} &= \frac{\bm{m}_{\tau}}{1-\beta_1^\tau}, \qquad
-    \bm{\hat{v}}_{\tau}  = \frac{\bm{v}_{\tau}}{1-\beta_2^\tau}
+    \hat{\bm{m}}_{\tau} &= \frac{\bm{m}_{\tau}}{1-\beta_1^\tau}, \qquad
+    \hat{\bm{v}}_{\tau}  = \frac{\bm{v}_{\tau}}{1-\beta_2^\tau}
                          \tag{bias correction} \\
     \boldsymbol{\theta}^{(\tau+1)}
                       &= \boldsymbol{\theta}^{(\tau)}
-                         - \frac{\alpha}{\sqrt{\bm{\hat{v}}_{\tau}}+\epsilon}\,
-                         \bm{\hat{m}}_{\tau}
+                         - \frac{\alpha}{\sqrt{\hat{\bm{v}}_{\tau}}+\epsilon}\,
+                         \hat{\bm{m}}_{\tau}
                          \tag{parameter update}
 \end{align*}
 where $\bm{m}_\tau$ and $\bm{v}_\tau$ are the first and second moment
 estimates, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$ are the
-default hyperparameters, and $\alpha$ is the base learning rate. Gradients are computed via automatic differentiation in JAX in the DYNAMAX package.
-
-\subsection*{EM closed-form update $\hat{\bm{B}}_i$ and $\boldsymbol{\hat\Sigma}_{B_{i|i}}$}\phantomsection\label{sec:update_B_and_Sigma_B}
-% \subsection*{Kalman two-step update for $\bm{B}$}
-% \textit{Predict:}
-% \begin{align*}
-%     \boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-%         \approx \boldsymbol{\hat\Sigma}_{B_{i-1|i-1}}\,\bm{s}_i\bm{s}_i^\top
-%         + 2\,\hat{\bm{A}}_i\,\bm{P}_{i,\,t_{\mathrm{stim}}-1|T}\,\hat{\bm{A}}_i^\top
-%         + 2\,\hat{\bm{Q}}_i
-% \end{align*}
-% \textit{Update:}
-% \begin{align*}
-%     \hat{\bm{B}}_{i|i} &\leftarrow \hat{\bm{B}}_{i|i-1} + \bm{K}_i^B\!\left(\bm{y}_{i,\,t_{\mathrm{stim}}} - \boldsymbol{\lambda}_{i,t_{\mathrm{stim}}}\right)\bm{s}_i^\top \\
-%     \boldsymbol{\hat\Sigma}_{B_{i|i}} &\leftarrow \left(\bm{I} - \bm{K}_i^B\,\bm{H}_{i,t_{\mathrm{stim}}}\,\bm{s}_i\bm{s}_i^\top\right)\boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-% \end{align*}
-% $\boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-%     \approx \boldsymbol{\hat\Sigma}_{B_{i-1|i-1}}\,\bm{s}_i\bm{s}_i^\top
-%     + 2\,\hat{\bm{A}}_i\,\bm{P}_{i-1,\,t_{\mathrm{stim}}-1|T}\,\hat{\bm{A}}_i^\top
-%     + 2\,\hat{\bm{Q}}_i$
-% \newline
-% $p(\bm{B}, \bm{A}, \bm{Q}, \bm{C}, \bm{d}, \bm{x}_{1:T} \mid \bm{y}_{1:T}, \bm{s}_{1:T})$
-% \newline
-% $p(\bm{B}, \bm{A}, \bm{Q}, \bm{C}, \bm{d}, \bm{x}_{1:T} \mid \bm{y}_{1:T})
-% \approx q(\bm{B})\, q(\bm{x}_{1:T})\, q(\bm{A})\, q(\bm{Q})\, q(\bm{C})\, q(\bm{d})$
-% \newline
-
-% $\boldsymbol{\hat\Sigma}_{B_{i|i-1}} = \operatorname{Cov}(\hat{\bm{B}}_{i-1|i-1}\,\bm{s}_i\bm{s}_i^\top)
-% + \operatorname{Cov}(\hat{\bm{A}}_i\,\bm{P}_{i-1,\,t_{\mathrm{stim}}-1|T}\,\hat{\bm{A}}_i^\top)
-% + \operatorname{Cov}(\hat{\bm{Q}}_i)$
-
+default hyperparameters, and $\alpha$ is the base learning rate. Gradients are computed via automatic differentiation in JAX in the DYNAMAX package. We get $\hat{\bm{\theta}}_i$ after convergence.
 
 \clearpage
-\subsection*{Getting the posterior $p(\bm{\hat{B}}_{i|i-1} \mid \bm{y}_{1:i-1}, \bm{s}_{i})$}
+\subsection*{Getting the posterior $p(\hat{\bm{B}}_{i|i-1} \mid \bm{y}_{1:i-1}, \bm{s}_{i})$}
 Stimulation pattern $\bm{s}_i \in \{0,1\}^N$ is fixed for trial $i$ and happens at $t_{\mathrm{stim}}$.
 \begin{align*}
     \bm{x}_{i,0} &\sim \mathcal{N}(\boldsymbol{\mu}_0, \boldsymbol{\Sigma}_0) \\
-    \bm{x}_{i, t} &= \bm{A}\bm{x}_{i, t-1} + \bm{B}\bm{s}_i + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
+    \bm{x}_{i, t} &= \bm{A}\bm{x}_{i, t-1} + \bm{B}\bm{u}_i + \boldsymbol{\epsilon}_t, \quad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q}) \\
     \bm{y}_{i, t} &\sim \text{Poisson}\!\left(\text{softplus}\!\left(\bm{C}\bm{x}_{i, t} + \bm{d}\right)\right)
 \end{align*}
 We assume we can factorize across the $\boldsymbol{\theta}$s (Much like coordinate ascent variational inference). We get the estimates of $\boldsymbol{\theta} \setminus \bm{B}$ known from PLDS fit via EKF SGD from trials $1, \ldots, i-1$ and treated as fixed at trial $i$. $\bm{s}_{t}$ is known:
@@ -479,116 +411,809 @@ Bayes':
 \end{align*}
 
 \clearpage
-\section*{Acquisition function (Selecting next stimulation pattern)}
-\phantomsection\label{sec:acquisition}
-We need to select the next stimulation pattern based on the updated posterior distribution of $\bm{B}$. Which means we need $\bm{\hat{B}}_{i+1|i}$ and $\boldsymbol{\hat\Sigma}_{B_{i+1|i}}$. We predict what the one timestep ahead prediction after stim for the next trial will be, to get $\boldsymbol{\hat\Sigma}_{B_{i+1|i}}$. Then we can choose stimulation $\bm{s}_{i+1}$ accordingly.
+\section*{Acquisition}
+\phantomsection\label{sec:RLS}
 
-At time step $t-1$, one timestep before stimulation:
+We select the next stimulation pattern by minimizing either the determinant (D-optimal) or the trace (A-optimal) of the covariance of $\bm{B}$. From SGD, we only get point estimates of the PLDS parameters. Therefore, we run a separate recursive least squares (RLS) tracker for $\bm{B}$. We work with two representations (assumptions) of that posterior covariance:
+\begin{enumerate}
+    \item \textbf{Per row covariance}: $K$ separate $N\times N$ matrices $\hat{\bm{\Sigma}}_{B_i}^{(k)}$, one per latent, assuming stimulation effects on the latents do not interact. We use this for \textbf{D-optimal}, since the determinant calculation for the full covariance may be intractable. The per row log-determinant decomposes into a sum of $K$ terms.
+    \item \textbf{Full $NK\times NK$ covariance} over $\bm{B}$ stacked into a vector. Retains cross-latent correlations. We use this for \textbf{A-optimal}, which doesn't need a determinant of a
+    large matrix.
+    \begin{enumerate}
+        \item TODO: The trace reads only diagonal entries, but its one-trial-ahead \emph{value} still depends on the off-diagonal blocks through the update, so the two pairings are not interchangeable.
+    \end{enumerate}
+\end{enumerate}
+
+
+\subsection*{One-step ahead prediction of latents gives us the estimate of the perturbation}
+
+Given the smoothed latents $\{\hat{\bm{x}}_{i,t|T}\}_{t=1}^T$, we can treat each row as a scalar observation RLS. We describe it in the following: 
+
+The effective stimulation input is $\bm{u}_i = \mathrm{softplus}(\bm{V}\bm{s}_i+\bm{b}) \in \mathbb{R}^N$. The stimulation-induced perturbation is $\bm{z}_i = \bm{B}\bm{u}_i$, and from the EKF forward pass + RTS smoother at trial $i$ we estimate it by the one-step residual. Here, $t$ denotes the final time bin at which the stimulation input is applied, so the stimulation-induced perturbation is observed in the transition from $t$ to $t+1$.
 \begin{align*}
-    \bm{x}_{i+1, \text{t}} &= \bm{A}\bm{x}_{i+1, t-1} + \bm{B}\bm{s}_{i+1} + \boldsymbol{\epsilon}_t\\
-    \bm{B}\bm{s}_{i+1} &= \bm{x}_{i+1, \text{t}} - \bm{A}\bm{x}_{i+1, t-1} - \boldsymbol{\epsilon}_t
+    \hat{\bm{z}}_i &:= \hat{\bm{x}}_{i,t+1|T} - \hat{\bm{A}}_i\hat{\bm{x}}_{i,t|T}\\
+    \bm{z}_i &= \bm{B}\bm{u}_i\\
+    \bm{z}_i &= \hat{\bm{x}}_{i,t+1|T} - \hat{\bm{A}}_i\hat{\bm{x}}_{i,t|T} - \boldsymbol{\varepsilon}_i, \quad \boldsymbol{\varepsilon}_i \sim \mathcal{N}(\bm{0},\bm{R}_i),
+\end{align*}
+The error covariance collects the smoother uncertainty at both timesteps plus the process noise:
+\begin{align*}
+    \bm{R}_i
+    &= \mathrm{Cov}(\hat{\bm{x}}_{i,t+1|T}) + \hat{\bm{A}}_i\mathrm{Cov}(\hat{\bm{x}}_{i,t|T})\hat{\bm{A}}_i^\top + \hat{\bm{Q}}_i \\
+    &\quad - \mathrm{Cov}(\hat{\bm{x}}_{i,t+1|T}, \hat{\bm{x}}_{i,t|T})\hat{\bm{A}}_i^\top
+           - \hat{\bm{A}}_i\mathrm{Cov}(\hat{\bm{x}}_{i,t+1|T}, \hat{\bm{x}}_{i,t|T})^\top \\ &\text{(Assumption: we don't have cross-cov, drop for now, and we ignore $\mathrm{Cov}(\hat{\bm{A}})$)} \\
+    &\approx \hat{\bm{P}}_{i,t+1|T} + \hat{\bm{A}}_i\hat{\bm{P}}_{i,t|T}\hat{\bm{A}}_i^\top + \hat{\bm{Q}}_i
 \end{align*}
 
-Substitute $\bm{\hat{B}}_{i|i}$ as our estimator of $\bm{B}$, and substituting EKF smoothed means, poststim means $\bm{\hat{x}}_{i, t|T}, \bm{\hat{x}}_{i,t-1|T}$, in place of true latent states, and accurate description of estimations:
-\begin{align*}
-    \bm{\hat{B}}_{i+1|i}\bm{s}_{i+1} &= \bm{\hat{x}}_{i+1,t|T} - \bm{\hat{A}}\bm{\hat{x}}_{i+1,t-1|T} - \boldsymbol{\epsilon}_t
-\end{align*}
-where:
-\begin{itemize}
-    \item $\boldsymbol{\epsilon}_t \sim \mathcal{N}(\bm{0}, \bm{Q})$
-    \item $ \bm{x}_{t-1} \approx \bm{x}_{t-1|T} \sim \mathcal{N}(\bm{\hat{x}}_{i, t-1|T}, \bm{P}_{i, t-1|T})$
-    \item $ \bm{x}_{t} \approx \bm{x}_{t|T} \sim \mathcal{N}(\bm{\hat{x}}_{i, t|T}, \bm{P}_{i, t|T})$
-    \item For now we ignore Cov($\bm{\hat{A}}$)
-\end{itemize}
+\inlinecomment{The RTS smoother does produce the lag-one cross-covariance (it is already needed for the M-step). If it is available, keep these two terms rather than dropping them --- they are subtractive, so dropping them inflates $\bm{R}_i$ and makes every stimulus look less informative than it is.}
 
-Now we want the covariance:
-\begin{align*}
-    \boldsymbol{\Sigma}_{B_{i+1|i}} = \operatorname{Cov}(\bm{\hat{B}}_{i+1|i}) &= \operatorname{Cov}(\bm{\hat{x}}_{i,t|T}) + \operatorname{Cov}(\bm{\hat{A}}\bm{\hat{x}}_{i,t-1|T}) + \operatorname{Cov}(\boldsymbol{\epsilon}_t)\\
-    \boldsymbol{\Sigma}_{B_{i|i}} &\approx \operatorname{Cov}(\bm{\hat{A}}\bm{\hat{x}}_{i,t-1|T} + \bm{\hat{B}}_{i|i}\bm{s}_t + \boldsymbol{\epsilon}_t) + \bm{\hat{A}}\bm{P}_{i,t-1|T}\bm{\hat{A}}^\top + \bm{Q}\\
-    \boldsymbol{\Sigma}_{B_{i|i}} &\approx \operatorname{Cov}(\bm{\hat{B}}_{i|i}\bm{s}_t) + 2\bm{\hat{A}}\bm{P}_{i,t-1|T}\bm{\hat{A}}^\top + 2\bm{Q}
-\end{align*}
-
-Let $\bm{\hat{B}}_{i|i}\bm{s}_t$ be $\bm{Bs}$ for now.
-\begin{align*}
-    \operatorname{Cov}(\bm{Bs}) &= \mathbb{E}\!\left[\bm{Bss}^T\bm{B}^T\right] - \mathbb{E}[\bm{Bs}]\,\mathbb{E}[\bm{Bs}]^T
-\end{align*}
-
-To capture the dependencies across channels (not IID), use the posterior of $\bm{B}$ from \eqref{eq:posterior_B}. We know from EKF $\mathbb{E}[\bm{B}] = \bm{\hat{B}}_{i|i}, \operatorname{Cov}(\bm{\hat{B}}_{i|i}) = \boldsymbol{\hat\Sigma}_{B_{i|i}}$:
-\begin{align*}
-    \operatorname{Cov}(\bm{Bs}) 
-        &= \mathbb{E}\!\left[\bm{Bss}^T\bm{B}^T\right] - \mathbb{E}[\bm{Bs}]\,\mathbb{E}[\bm{Bs}]^T \\
-    \operatorname{Cov}(\bm{Bs}) 
-        &= \mathbb{E}\!\left[\bm{B}\right]\bm{ss}^T\mathbb{E}\!\left[\bm{B}^T\right] 
-         + \operatorname{Cov}(\bm{B}) \cdot \bm{ss}^T
-         - \mathbb{E}[\bm{B}]\bm{ss}^T\mathbb{E}[\bm{B}]^T \\
-    \operatorname{Cov}(\bm{\hat{B}}_{i|i}\,\bm{s}_t)
-        &= \boldsymbol{\hat\Sigma}_{B_{i|i}}\, \bm{s}_t\bm{s}_t^\top
-\end{align*}
-
-Substituting back:
-\begin{align*}
-    \boldsymbol{\hat\Sigma}_{B_{i|i}}
-        &\approx \boldsymbol{\hat\Sigma}_{B_{i|i}}\, \bm{s}_t\bm{s}_t^\top
-         + 2\bm{\hat{A}}\bm{P}_{i,t-1|T}\bm{\hat{A}}^\top + 2\bm{Q}
-\end{align*}
-
-% \subsubsection*{One step ahead prediction in latent space at trial t to get one trial ahead $\operatorname{Cov}(\bm{\hat{B}}_{i|i})$ estimation (Information criterion)}
-% and also update with hypothetical choices of $\bm{s}_{i+1}$ to get $\boldsymbol{\hat\Sigma}_{B_{i+1|i}}$
+\subsubsection*{Notation}
+\begin{center}
+\begin{tabular}{ll}
+    \hline
+    Symbol & Definition \\
+    \hline
+    $\bm{w}^{(k)} \in \mathbb{R}^{N}$ & channel weights driving latent $k$; $\bm{B} = \bm{W}^\top$ \\
+    $\hat{\bm{\Sigma}}_{B_i}^{(k)} \in \mathbb{R}^{N\times N}$ & per-row covariance of row $k$ after trial $i$ \\
+    $\boldsymbol{\beta} = \mathrm{vec}(\bm{W}) \in \mathbb{R}^{NK}$ & $\bm{B}$ as a single parameter vector TODO\\
+    $\bm{\Sigma}_{B_i} \in \mathbb{R}^{NK\times NK}$ & full covariance; blocks $\bm{\Sigma}_{B_i}^{(k,l)} = \mathrm{Cov}(\bm{w}^{(k)},\bm{w}^{(l)})$, $\bm{\Sigma}_{B_i}^{(k,k)} = \hat{\bm{\Sigma}}_{B_i}^{(k)}$ \\
+    $\sigma_k^2$ & prior scale for row $k$ \\
+    $\sigma^2_{k|\bm{u}_i} = \bm{u}_i^\top \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}\bm{u}_i$ & prior variance of row $k$ along the stimulated direction \\
+    $\bm{D}_i = \bm{M}_{\mathrm{\tau}}\,\mathrm{diag}(\sigma^2_{1|\bm{u}_i},\dots,\sigma^2_{K|\bm{u}_i})\,\bm{M}_{\mathrm{\tau}}^\top$ & parameter-uncertainty part of the predictive covariance \\
+    $\bm{R}_i$ & smoother noise covariance\\
+    $\bm{S}_i = \bm{D}_i + \bm{R}_i \in \mathbb{R}^{K\times K}$ & predictive covariance of $\bm{z}_i$; the only matrix inverted \\
+    $\bm{M}_{\mathrm{\tau}}$ & accumulated dynamics operator over the stimulation duration \\
+    $\boldsymbol{\eta}_i = \hat{\bm{z}}_i - \bm{M}_{\mathrm{\tau}}\hat{\bm{B}}_{i-1}\bm{u}_i$ & innovation at trial $i$ \\
+    \hline
+\end{tabular}
+\end{center}
+\noindent
 \clearpage
-\subsubsection*{Derivation}
-For adaptive selection of stimulation patterns, before each trial $i+1$, we want to select 
-$\bm{s}_{i+1}$ that maximizes the expected information gain about $\bm{B}$. 
-Equivalently, this would be selecting $\bm{s}_{i+1}$ that minimizes the determinant 
-of the covariance of $\bm{B}$ after trial $i+1$ ($\boldsymbol{\hat\Sigma}_{B_{i+1|i+1}}$).
+\subsection*{Multiple step ahead perturbation gives us perturbations propagated by the dynamics operator}
+
+If stimulation happens over multiple time bins where we have missing observations, we treat the prestim and poststim observation as a multi-step propagation. The stimulation-induced perturbation is propagated through the dynamics operator over the stimulation duration. Let $\tau$ denote the number of stimulation bins. Then
 \begin{align*}
-    \text{Let } & \boldsymbol{\Sigma}_{B_{i|i}}^{-1}
-    && \text{be the precision matrix of $\bm{B}$ after trial $i$}\\
-    \text{Let } & \boldsymbol{\Delta}_{i+1} = \bm{B}\bm{s}_{i+1}
-    && \text{be the latent perturbation induced by stimulation pattern $\bm{s}_{i+1}$}\\
-    \text{Let } & \beta
-    && \text{be how we scale our data relative to our prior (could be $1/n$)}
+    \bm{M}_{\mathrm{\tau}}
+    &:=
+    \bm{I}
+    + \bm{A}
+    + \cdots
+    + \bm{A}^{\mathrm{\tau}-1}.
 \end{align*}
-In terms of precision, we can formulate the Gaussian case as:
+
+The effective perturbation accumulated over the stimulation period is therefore
+\begin{align*}
+    \bm{z}_i
+    &=
+    \bm{M}_{\mathrm{\tau}}\bm{B}\bm{u}_i.
+\end{align*}
+
+If $\hat{\bm{x}}_{i,t|T}$ denotes the smoothed latent immediately before the stimulation period and $\hat{\bm{x}}_{i,t+\tau|T}$ denotes the smoothed latent immediately after stimulation, the one-step residual is replaced by the multi-step residual
+\begin{align*}
+    \hat{\bm{z}}_i
+    &:=
+    \hat{\bm{x}}_{i,t+\tau|T}
+    -
+    \hat{\bm{A}}_i^{\mathrm{\tau}}
+    \hat{\bm{x}}_{i,t|T}
+\end{align*}
+
+Thus,
+\begin{align*}
+    \bm{z}_i
+    &=
+    \bm{M}_{\mathrm{\tau}}\bm{B}\bm{u}_i,
+    \\
+    \bm{z}_i
+    &=
+    \hat{\bm{x}}_{i,t+\tau|T}
+    -
+    \hat{\bm{A}}_i^{\mathrm{\tau}}
+    \hat{\bm{x}}_{i,t|T}
+    -
+    \boldsymbol{\varepsilon}_i,
+    \qquad
+    \boldsymbol{\varepsilon}_i
+    \sim
+    \mathcal{N}(\bm{0},\bm{R}_i).
+\end{align*}
+The error covariance collects the smoother uncertainty at both endpoints plus the process noise accumulated over the stimulation period:
+\begin{align*}
+    \bm{R}_i
+    &=
+    \mathrm{Cov}(\hat{\bm{x}}_{i,t+\tau|T})
+    +
+    \hat{\bm{A}}_i^{\mathrm{\tau}}
+    \mathrm{Cov}(\hat{\bm{x}}_{i,t|T})
+    \left(\hat{\bm{A}}_i^{\mathrm{\tau}}\right)^\top
+    \\
+    &\quad
+    +
+    \sum_{j=0}^{\mathrm{\tau}-1}
+    \hat{\bm{A}}_i^j
+    \hat{\bm{Q}}_i
+    \left(\hat{\bm{A}}_i^j\right)^\top
+    \\
+    &\quad
+    - \text{cross-covariance terms}
+\end{align*}
+
+Under the assumption that we do not have the required cross-covariances, and ignoring $\mathrm{Cov}(\hat{\bm{A}}_i)$,
+\begin{align*}
+    \bm{R}_i
+    &\approx
+    \hat{\bm{P}}_{i,t+\tau|T}
+    +
+    \hat{\bm{A}}_i^{\mathrm{\tau}}
+    \hat{\bm{P}}_{i,t|T}
+    \left(\hat{\bm{A}}_i^{\mathrm{\tau}}\right)^\top
+    \\
+    &\quad
+    +
+    \sum_{j=0}^{\mathrm{\tau}-1}
+    \hat{\bm{A}}_i^j
+    \hat{\bm{Q}}_i
+    \left(\hat{\bm{A}}_i^j\right)^\top
+\end{align*}
+\clearpage
+\subsection*{D-optimal (per row)}
+
+D-optimal experimental design minimizes the determinant of the covariance of $\bm{B}$ (the volume of the uncertainty ellipsoid). Here we take the per-row representation: the rows of the posterior $\bm{B}$ are assumed to be row-independent, with covariance $\bm{\Sigma}_{B_i} = \operatorname{diag}(\bm{\Sigma}_{B_i}^{(1)}, \bm{\Sigma}_{B_i}^{(2)}, \dots, \bm{\Sigma}_{B_i}^{(k)})$, so each latent carries its own $N\times N$ covariance and the log-determinant decomposes into a sum of $K$ terms.
+
+\subsubsection*{Row decomposition and priors}
+Let $\bm{w}^{(k)} \in \mathbb{R}^{N}$ be:
+\begin{align*}
+    \bm{B} = \bm{W}^\top \in \mathbb{R}^{K\times N} =
+    \begin{bmatrix}\bm{w}_1^\top \\ \bm{w}_2^\top \\ \vdots \\ \bm{w}_K^\top\end{bmatrix}.
+\end{align*}
+Row $k$ collects the effect of stimulation at each of the $N$ channels on latent $k$ alone. Each row has its own prior,
+\begin{align*}
+    \bm{w}^{(k)} \sim \mathcal{N}\big(\bm{0},\, \hat{\bm{\Sigma}}_{B_0}^{(k)}\big),
+    \qquad \hat{\bm{\Sigma}}_{B_0}^{(k)} = \sigma_k^2\,\bm{I}_N,
+\end{align*}
+isotropic across channels, $\sigma_k^2$ is the prior "scale" for how strongly stimulation is expected to move latent $k$. We initialize this to be proportional to the ``magnitude'' of row $k$ of
+$\bm{B}$. Setting all $\sigma_{B, k}^2 = \sigma_B^2$ recovers a shared variance scale. Treating the rows as independent is the assumption that stimulation effects on each latent do not interact. The only coupling that remains enters through the shared noise covariance $\bm{R}_i$.
+
+\subsubsection*{Predictive covariance of the observation}
+For row $k$, the relevant predictive quantity is the variance of the scalar $\bm{w}^{(k)\top}\bm{u}_i$ under the current prior $\bm{w}^{(k)}\sim\mathcal N(\hat{\bm{w}}_{i-1}^{(k)},\hat{\bm{\Sigma}}_{B_{i-1}}^{(k)})$. The variance of this predictive quantity is:
+\begin{align*}
+    \mathrm{Var}(\bm{w}^{(k)\top}\bm{u}_i)
+        &= \mathbb{E}\!\left[(\bm{w}^{(k)\top}\bm{u}_i)^2\right] - \big(\mathbb{E}[\bm{w}^{(k)\top}\bm{u}_i]\big)^2 \\
+        &= \mathbb{E}\!\left[\bm{u}_i^\top \bm{w}^{(k)}\bm{w}^{(k)\top} \bm{u}_i\right] - \bm{u}_i^\top\,\mathbb{E}[\bm{w}^{(k)}]\mathbb{E}[\bm{w}^{(k)}]^\top\,\bm{u}_i \\
+        &= \bm{u}_i^\top\Big(\mathbb{E}\!\left[\bm{w}^{(k)}\bm{w}^{(k)\top}\right] - \mathbb{E}[\bm{w}^{(k)}]\mathbb{E}[\bm{w}^{(k)}]^\top\Big)\bm{u}_i
+         = \bm{u}_i^\top\,\mathrm{Cov}(\bm{w}^{(k)})\,\bm{u}_i.
+\end{align*}
+Using $\mathrm{Cov}(\bm{w}^{(k)})=\hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}$ from the prior, this gives
+\begin{align*}
+    \sigma^2_{k|\bm{u}_i} := \mathrm{Var}(\bm{w}^{(k)\top}\bm{u}_i) = \bm{u}_i^\top \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)} \bm{u}_i,
+\end{align*}
+
+Without multi-step propagation, these row-wise uncertainties enter different coordinates of $\bm{z}_i$ independently. With multi-step propagation, however, the dynamics operator mixes these latent coordinates. Specifically,
+
+\begin{align*}
+    \bm{z}_i
+    =
+    \bm{M}_{\mathrm{\tau}}
+    \bm{B}\bm{u}_i.
+\end{align*}
+
+Therefore the parameter-uncertainty contribution to the predictive covariance is
+
+\begin{align*}
+    \bm{D}_i
+    &:=
+    \bm{M}_{\mathrm{\tau}}
+    \operatorname{diag}
+    \left(
+        \sigma^2_{1|\bm{u}_i},
+        \dots,
+        \sigma^2_{K|\bm{u}_i}
+    \right)
+    \bm{M}_{\mathrm{\tau}}^\top.
+\end{align*}
+
+Adding the observation noise gives the full predictive covariance
+
+\begin{align*}
+    \mathbb{E}[\bm{z}_i\mid\bm{u}_i]
+    &=
+    \bm{M}_{\mathrm{\tau}}
+    \bm{B}\bm{u}_i,
+    \\
+    \mathrm{Var}(\bm{z}_i\mid\bm{u}_i)
+    &=
+    \bm{S}_i
+    :=
+    \bm{D}_i+\bm{R}_i
+    \in\mathbb{R}^{K\times K}.
+\end{align*}
+The two components are:
+\begin{enumerate}[itemsep=0em, topsep=0.2em]
+    \item $\bm{D}_i$: uncertainty in the prediction of $\bm{z}_i$ due to uncertainty in $\bm{B}$. The covariance is diagonal before propagation, but $\bm{M}_{\mathrm{\tau}}$ can introduce correlations across latent coordinates.
+    \item $\bm{R}_i$: uncertainty in the observation of $\bm{z}_i$ from noise in the measurement process, inherited from the latents. This noise can correlate across latents.
+\end{enumerate}
+\clearpage
+% Replaces \subsubsection*{RLS gain and update via joint Gaussian conditioning}
+% through the "Repeating for every k" paragraph.
+
+\subsubsection*{RLS gain and update via joint Gaussian conditioning}
+The unknown row $\bm{w}^{(k)}$ is Gaussian and $\bm{z}_i = \bm{M}_{\mathrm{\tau}}\bm{B}\bm{u}_i + \boldsymbol{\varepsilon}_i$ is a linear
+function of it plus independent Gaussian noise, so $(\bm{w}^{(k)}, \bm{z}_i)$ are jointly Gaussian and
+the posterior for row $k$ is available in closed form:
+\begin{align*}
+    \bm{w}^{(k)} \mid \bm{z}_i \;\sim\; \mathcal{N}\Big(
+        \hat{\bm{w}}_{i-1}^{(k)} + \bm{\Gamma}_i^{(k)}\bm{S}_i^{-1}\big(\bm{z}_i - \bm{M}_{\mathrm{\tau}}\hat{\bm{B}}_{i-1}\bm{u}_i\big),
+        \;\;
+        \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)} - \bm{\Gamma}_i^{(k)}\bm{S}_i^{-1}\bm{\Gamma}_i^{(k)\top}
+    \Big),
+\end{align*}
+with the prior mean $\hat{\bm{w}}_{i-1}^{(k)}$ and covariance $\hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}$, the predictive mean $\mathbb{E}[\bm{z}_i] = \bm{M}_{\mathrm{\tau}}\hat{\bm{B}}_{i-1}\bm{u}_i$ and covariance $\bm{S}_i = \bm{D}_i + \bm{R}_i$ from above, and the cross-covariance
+$\bm{\Gamma}_i^{(k)} := \mathrm{Cov}(\bm{w}^{(k)}, \bm{z}_i) \in \mathbb{R}^{N\times K}$.
+The posterior mean and covariance are $\hat{\bm{w}}_{i}^{(k)}$ and $\hat{\bm{\Sigma}}_{B_i}^{(k)}$.
+
+\paragraph{Cross-covariance.}
+
+The $l$-th column of $\bm{\Gamma}_i^{(k)}$ is
+\begin{align*}
+    \mathrm{Cov}
+    \left(
+        \bm{w}^{(k)},
+        [\bm{M}_{\mathrm{\tau}}\bm{B}\bm{u}_i]_l
+        +
+        \varepsilon_{i,l}
+    \right).
+\end{align*}
+
+Expanding coordinate $l$ of the propagated perturbation as a sum over latents, and using
+$[\bm{B}\bm{u}_i]_j = \bm{w}^{(j)\top}\bm{u}_i$,
+\begin{align*}
+    [\bm{M}_{\mathrm{\tau}}\bm{B}\bm{u}_i]_l
+    &= \sum_{j=1}^{K} [\bm{M}_{\mathrm{\tau}}]_{lj}\,[\bm{B}\bm{u}_i]_j
+     = \sum_{j=1}^{K} [\bm{M}_{\mathrm{\tau}}]_{lj}\,\bm{w}^{(j)\top}\bm{u}_i.
+\end{align*}
+The noise is independent of $\bm{B}$, so $\mathrm{Cov}(\bm{w}^{(k)},\varepsilon_{i,l}) = \bm{0}$, and
+the rows are independent a priori, so $\mathrm{Cov}(\bm{w}^{(k)},\bm{w}^{(j)}) = \bm{0}$ for
+$j \neq k$. Only the $j=k$ term survives:
+\begin{align*}
+    \mathrm{Cov}\big(\bm{w}^{(k)}, z_{i,l}\big)
+    &= \sum_{j=1}^{K} [\bm{M}_{\mathrm{\tau}}]_{lj}\,
+       \mathrm{Cov}\big(\bm{w}^{(k)},\, \bm{w}^{(j)\top}\bm{u}_i\big) \\
+    &= [\bm{M}_{\mathrm{\tau}}]_{lk}\,\mathrm{Cov}\big(\bm{w}^{(k)}\big)\,\bm{u}_i
+     = [\bm{M}_{\mathrm{\tau}}]_{lk}\,\bm{v}_k,
+    \qquad
+    \bm{v}_k := \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}\bm{u}_i \in \mathbb{R}^{N}.
+\end{align*}
+Every column is therefore the same vector $\bm{v}_k$, scaled by the corresponding entry of the
+$k$-th \emph{column} of $\bm{M}_{\mathrm{\tau}}$. Stacking $l = 1,\dots,K$ gives
+$\bm{\Gamma}_i^{(k)} = \bm{v}_k\,(\bm{M}_{\mathrm{\tau}}\bm{e}_k)^\top$, with dimensions
+$(N\times N)(N\times 1)(1\times K)(K\times K) = N\times K$.
+
+Written out, the cross-covariance is
+\begin{align*}
+    \bm{\Gamma}_i^{(k)}
+    &=
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    \bm{u}_i
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \in\mathbb{R}^{N\times K}.
+\end{align*}
+
+
+\paragraph{Innovation, mean update, and gain}
+
+The innovation is the difference between the trial's observed perturbation and the predicted perturbation from the previous trial $i-1$. Define
+\begin{align*}
+    \boldsymbol{\eta}_i
+    &:=
+    \hat{\bm{z}}_i
+    -
+    \bm{M}_{\mathrm{\tau}}
+    \hat{\bm{B}}_{i-1}
+    \bm{u}_i
+    \in\mathbb{R}^K
+\end{align*}
+
+Substituting
+$\bm{\Gamma}_i^{(k)}
+=
+\hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+\bm{u}_i
+\bm{e}_k^\top
+\bm{M}_{\mathrm{\tau}}^\top$,
+\begin{align*}
+    \hat{\bm{w}}_i^{(k)}
+    &=
+    \hat{\bm{w}}_{i-1}^{(k)}
+    +
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    \bm{u}_i
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i^{-1}
+    \boldsymbol{\eta}_i.
+\end{align*}
+
+Define the projected gain
+\begin{align*}
+    \bm{g}_{i,k}
+    &:=
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    \bm{u}_i
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i^{-1},
+\end{align*}
+
+so that
+\begin{align*}
+    \boxed{
+    \hat{\bm{w}}_i^{(k)}
+    =
+    \hat{\bm{w}}_{i-1}^{(k)}
+    +
+    \bm{g}_{i,k}\boldsymbol{\eta}_i
+    }.
+\end{align*}
+
+\paragraph{Covariance update.}
+The covariance update is
+\begin{align*}
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    &=
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    -
+    \bm{\Gamma}_i^{(k)}
+    \bm{S}_i^{-1}
+    \bm{\Gamma}_i^{(k)\top}
+    \\
+    &=
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    -
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    \bm{u}_i
+    \left(
+        \bm{e}_k^\top
+        \bm{M}_{\mathrm{\tau}}^\top
+        \bm{S}_i^{-1}
+        \bm{M}_{\mathrm{\tau}}
+        \bm{e}_k
+    \right)
+    \bm{u}_i^\top
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}.
+\end{align*}
+
+Let
+\begin{align*}
+    \alpha_{i,k}
+    &:=
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i^{-1}
+    \bm{M}_{\mathrm{\tau}}
+    \bm{e}_k.
+\end{align*}
+\begin{align*}
+    \boxed{
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    =
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    -
+    \alpha_{i,k}
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    \bm{u}_i\bm{u}_i^\top
+    \hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}
+    }.
+\end{align*}
+Repeating for every $k=1,\dots,K$ and stacking recovers $\hat{\bm{B}}_i$ directly. The row-independence assumption enters at $\bm{\Gamma}_i^{(k)}$ for the mean update and grabbing $(\bm{S}_i^{-1})_{kk}$ in the covariance update.
+
+\paragraph{Implementation convention.}
+The equations above are written in the observation space of $\bm{z}_i$, so
+$\bm{M}_{\mathrm{\tau}}$ appears explicitly. The implementation instead premultiplies the
+observation and its noise by $\bm{M}_{\mathrm{\tau}}^{-1}$, tracking
+$\bm{M}_{\mathrm{\tau}}^{-1}\hat{\bm{z}}_i$ with noise covariance
+$\bm{M}_{\mathrm{\tau}}^{-1}\bm{R}_i\bm{M}_{\mathrm{\tau}}^{-\top}$, so no
+$\bm{M}_{\mathrm{\tau}}$ appears anywhere in the update. The two are identical: writing
+$\bm{S}_i'$ for the predictive covariance in the transformed space,
+\begin{align*}
+    \bm{S}_i'
+    =
+    \operatorname{diag}(\sigma^2_{1|\bm{u}_i},\dots,\sigma^2_{K|\bm{u}_i})
+    + \bm{M}_{\mathrm{\tau}}^{-1}\bm{R}_i\bm{M}_{\mathrm{\tau}}^{-\top}
+    =
+    \bm{M}_{\mathrm{\tau}}^{-1}\bm{S}_i\bm{M}_{\mathrm{\tau}}^{-\top},
+    \qquad
+    \bm{S}_i'^{-1}
+    =
+    \bm{M}_{\mathrm{\tau}}^\top\bm{S}_i^{-1}\bm{M}_{\mathrm{\tau}},
+\end{align*}
+so $(\bm{S}_i'^{-1})_{kk} = \alpha_{i,k}$ exactly, and with
+$\boldsymbol{\eta}_i' = \bm{M}_{\mathrm{\tau}}^{-1}\boldsymbol{\eta}_i$ the mean update
+$\hat{\bm{\Sigma}}_{B_{i-1}}^{(k)}\bm{u}_i\bm{e}_k^\top\bm{S}_i'^{-1}\boldsymbol{\eta}_i'$
+reduces to $\bm{g}_{i,k}\boldsymbol{\eta}_i$. Note this equivalence relies on $\bm{D}_i$
+carrying the $\bm{M}_{\mathrm{\tau}}\cdot\bm{M}_{\mathrm{\tau}}^\top$ sandwich; pairing a flat
+$\bm{D}_i$ with an $\boldsymbol{\eta}_i$ that includes $\bm{M}_{\mathrm{\tau}}$ gives a filter
+mismatched by one factor of $\bm{M}_{\mathrm{\tau}}$.
+
+\clearpage
+\subsubsection*{Log-determinant with hypothetical $\bm{u}_{i+1}$}
+For a hypothetical stimulation input $\bm{u}_{i+1}$, define the
+one-trial-ahead predictive covariance of the observed perturbation as
+\begin{align*}
+    \bm{S}_i(\bm{u}_{i+1})
+    &:=
+    \operatorname{Cov}
+    \left(
+        \bm{z}_{i+1}
+        \mid
+        \mathcal{D}_i,\bm{u}_{i+1}
+    \right) \\
+    &=
+    \bm{M}_{\mathrm{\tau}}
+    \operatorname{diag}
+    \left(
+        \bm{u}_{i+1}^\top
+        \hat{\bm{\Sigma}}_{B_i}^{(1)}
+        \bm{u}_{i+1},
+        \dots,
+        \bm{u}_{i+1}^\top
+        \hat{\bm{\Sigma}}_{B_i}^{(K)}
+        \bm{u}_{i+1}
+    \right)
+    \bm{M}_{\mathrm{\tau}}^\top
+    +
+    \bm{R}_i.
+\end{align*}
+
+Because
+\[
+    \bm{z}_{i+1}
+    =
+    \bm{M}_{\mathrm{\tau}}
+    \bm{B}\bm{u}_{i+1}
+    +
+    \boldsymbol{\varepsilon}_{i+1},
+\]
+the cross-covariance between the $k$th parameter row and the
+observation vector is
+\begin{align*}
+    \bm{\Gamma}_{i+1}^{(k)}
+    &:=
+    \operatorname{Cov}
+    \left(
+        \bm{w}^{(k)},\bm{z}_{i+1}
+    \right) \\
+    &=
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \bm{u}_{i+1}
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \in\mathbb{R}^{N\times K}.
+\end{align*}
+
+The Gaussian conditioning covariance update is therefore
+\begin{align*}
+    \hat{\bm{\Sigma}}_{B_{i+1}}^{(k)}
+    &=
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    -
+    \bm{\Gamma}_{i+1}^{(k)}
+    \bm{S}_i(\bm{u}_{i+1})^{-1}
+    \bm{\Gamma}_{i+1}^{(k)\top} \\
+    &=
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    -
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \bm{u}_{i+1}
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i(\bm{u}_{i+1})^{-1}
+    \bm{M}_{\mathrm{\tau}}
+    \bm{e}_k
+    \bm{u}_{i+1}^\top
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}.
+\end{align*}
+
+Define
+\begin{align*}
+    \alpha_{i,k}(\bm{u}_{i+1})
+    &:=
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i(\bm{u}_{i+1})^{-1}
+    \bm{M}_{\mathrm{\tau}}
+    \bm{e}_k, \\
+    \bm{v}_k
+    &:=
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \bm{u}_{i+1}.
+\end{align*}
+
+Then each row's covariance update is a rank-1 downdate,
+\begin{align*}
+    \hat{\bm{\Sigma}}_{B_{i+1}}^{(k)}
+    =
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    -
+    \alpha_{i,k}(\bm{u}_{i+1})
+    \bm{v}_k\bm{v}_k^\top.
+\end{align*}
+
+Thus, by the matrix determinant lemma,
+\begin{align*}
+    \det
+    \left(
+        \hat{\bm{\Sigma}}_{B_{i+1}}^{(k)}
+    \right)
+    &=
+    \left[
+        1
+        -
+        \alpha_{i,k}(\bm{u}_{i+1})
+        \bm{v}_k^\top
+        \left(
+            \hat{\bm{\Sigma}}_{B_i}^{(k)}
+        \right)^{-1}
+        \bm{v}_k
+    \right]
+    \det
+    \left(
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \right) \\
+    &=
+    \left[
+        1
+        -
+        \bm{e}_k^\top
+        \bm{M}_{\mathrm{\tau}}^\top
+        \bm{S}_i(\bm{u}_{i+1})^{-1}
+        \bm{M}_{\mathrm{\tau}}
+        \bm{e}_k
+        \,
+        \bm{u}_{i+1}^\top
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+        \bm{u}_{i+1}
+    \right]
+    \det
+    \left(
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \right),
+\end{align*}
+where
+\begin{align*}
+    \bm{v}_k^\top
+    \left(
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \right)^{-1}
+    \bm{v}_k
+    =
+    \bm{u}_{i+1}^\top
+    \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \bm{u}_{i+1}.
+\end{align*}
+
+\subsubsection*{Information gain}
+
+Define the per-row information gain for a hypothetical stimulus $\bm{u}$ as
+\begin{align*}
+    \mathcal{I}_{i,k}(\bm{u})
+    &:=
+    \log\det
+    \left(
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+    \right)
+    -
+    \log\det
+    \left(
+        \hat{\bm{\Sigma}}_{B_{i+1}}^{(k)}
+    \right) \\
+    &=
+    -\log\left[
+        1
+        -
+        \bm{e}_k^\top
+        \bm{M}_{\mathrm{\tau}}^\top
+        \bm{S}_i(\bm{u})^{-1}
+        \bm{M}_{\mathrm{\tau}}
+        \bm{e}_k
+        \,
+        \bm{u}^\top
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+        \bm{u}
+    \right].
+\end{align*}
+
+The relevant precision for row $k$ is therefore
+\begin{align*}
+    \bm{e}_k^\top
+    \bm{M}_{\mathrm{\tau}}^\top
+    \bm{S}_i(\bm{u})^{-1}
+    \bm{M}_{\mathrm{\tau}}
+    \bm{e}_k,
+\end{align*}
+This integrates the dynamics-induced mixing through $\bm{M}_{\tau}$, observation uncertainty through $\bm{R}_i$, and parameter uncertainty through $\bm{D}_i$, and therefore depends on the candidate stimulus itself through $\bm{S}_i(\bm{u})$.
+
+Although the rows of $\bm{B}$ are independent a priori, conditioning on the vector-valued observation $\bm{z}_i$ generally induces posterior correlations between rows, particularly when $\bm{M}_{\tau}$ mixes latent coordinates or $\bm{R}_i$ is non-diagonal. We therefore maintain only the marginal covariance of each row and discard the posterior cross-row covariances. The resulting D-optimal criterion is an approximate, row-factorized design criterion.
+\begin{align*}
+    \bm{s}_{i+1}^{*}
+    &=
+    \arg\max_{r\in\{1,\dots,N-7\}}
+    \sum_{k=1}^{K}
+    -
+    \log\left[
+        1
+        -
+        \bm{e}_k^\top
+        \bm{M}_{\mathrm{\tau}}^\top
+        \bm{S}_i(\bm{u}_r)^{-1}
+        \bm{M}_{\mathrm{\tau}}
+        \bm{e}_k
+        \,
+        \bm{u}_r^\top
+        \hat{\bm{\Sigma}}_{B_i}^{(k)}
+        \bm{u}_r
+    \right],
+    \\
+    \bm{u}_r
+    &:=
+    \operatorname{softplus}
+    \left(
+        \bm{V}\bm{s}_r+\bm{b}
+    \right),
+\end{align*}
+where
+\begin{align*}
+    \bm{s}_r
+    &:=
+    \sum_{j=0}^{7}\bm{e}_{r+j},
+    \qquad
+    r\in\{1,\dots,N-7\}.
+\end{align*}
+
+% \clearpage
+% \subsection*{A-optimal (full $NK \times NK$ covariance)}
+
+% $\bm{\Phi}_i = \bm{I}_K \otimes \bm{u}_i^\top$ and stimulation design operator (full-covariance form)
+% Note $\bm{\Phi}_i$ is distinct from the EKF emission Jacobian $\bm{H}_t$, and $\bm{S}_i$ (trial index)from the EKF innovation covariance $\bm{S}_t$ (timestep index).
+
+% A-optimal minimizes the trace of the covariance of $\bm{B}$, i.e.\ the total marginal variance
+% summed over all $NK$ entries. Because the trace reads only diagonal entries, it is well defined
+% regardless of how much of the covariance we track --- which makes it the natural criterion to
+% pair with the full representation, where no determinant of a large matrix is ever required. The
+% cost is that the criterion itself ignores the correlations between entries that the
+% representation is at pains to keep.
+
+% \paragraph{Vectorized model.}
+% Keeping $\bm{w}^{(k)}$ and $\bm{B} = \bm{W}^\top$ as defined above, the parameter vector is the
+% ordinary column-stacking vectorization,
+% \begin{align*}
+%     \boldsymbol{\beta} := \mathrm{vec}(\bm{W}) = \begin{bmatrix}\bm{w}_1 \\ \vdots \\ \bm{w}_K\end{bmatrix} \in \mathbb{R}^{NK}.
+% \end{align*}
+% Since $\bm{z}_i = \bm{B}\bm{u}_i = \bm{W}^\top\bm{u}_i$, applying
+% $\mathrm{vec}(\bm{A}\bm{X}\bm{C}) = (\bm{C}^\top \otimes \bm{A})\,\mathrm{vec}(\bm{X})$ with
+% $\bm{A} = \bm{u}_i^\top$, $\bm{X} = \bm{W}$, $\bm{C} = \bm{I}_K$ makes $\hat{\bm{z}}_i$ a linear
+% observation of $\boldsymbol{\beta}$:
+% \begin{align*}
+%     \hat{\bm{z}}_i = \bm{\Phi}_i\boldsymbol{\beta} + \boldsymbol{\varepsilon}_i,
+%     \qquad
+%     \bm{\Phi}_i := \bm{I}_K \otimes \bm{u}_i^\top \in \mathbb{R}^{K\times NK},
+%     \qquad \boldsymbol{\varepsilon}_i \sim \mathcal{N}(\bm{0}, \bm{R}_i).
+% \end{align*}
+% Write $\bm{\Sigma}_{B_i} \in \mathbb{R}^{NK\times NK}$ for the posterior covariance of
+% $\boldsymbol{\beta}$ after trial $i$, partitioned into $N\times N$ blocks
+% $\bm{\Sigma}_{B_i}^{(k,l)} = \mathrm{Cov}(\bm{w}^{(k)}, \bm{w}^{(l)})$. The diagonal blocks are exactly
+% the per-row covariances of the previous section, $\bm{\Sigma}_{B_i}^{(k,k)} = \hat{\bm{\Sigma}}_{B_i}^{(k)}$.
+
+% \paragraph{Prior.}
+% The prior is block diagonal, since with no data there is no reason to correlate latents:
+% \begin{align*}
+%     \bm{\Sigma}_{B_0} = \mathrm{blockdiag}\big(\sigma_1^2\bm{I}_N, \dots, \sigma_K^2\bm{I}_N\big),
+% \end{align*}
+% reducing to $\sigma_B^2\bm{I}_{NK}$ if a single scale is used. The off-diagonal blocks are
+% \emph{induced by the data} through the correlated noise $\bm{R}_i$; the point of the full
+% representation is that they are kept rather than discarded after each trial.
+
+% \paragraph{Update.}
+% The update is a standard Kalman/RLS step, and requires no inverse larger than $K\times K$:
+% \begin{align*}
+%     \bm{J}_i &:= \bm{\Sigma}_{B_{i-1}}\bm{\Phi}_i^\top \in \mathbb{R}^{NK\times K} \\
+%     \bm{S}_i &:= \bm{\Phi}_i\bm{\Sigma}_{B_{i-1}}\bm{\Phi}_i^\top + \bm{R}_i \in \mathbb{R}^{K\times K} \\
+%     \hat{\boldsymbol{\beta}}_i &= \hat{\boldsymbol{\beta}}_{i-1} + \bm{J}_i\bm{S}_i^{-1}\boldsymbol{\eta}_i,
+%         \qquad \boldsymbol{\eta}_i = \hat{\bm{z}}_i - \bm{\Phi}_i\hat{\boldsymbol{\beta}}_{i-1} \\
+%     \bm{\Sigma}_{B_i} &= \bm{\Sigma}_{B_{i-1}} - \bm{J}_i\bm{S}_i^{-1}\bm{J}_i^\top
+% \end{align*}
+% The Kronecker structure makes both quantities cheap to assemble blockwise:
+% \begin{align*}
+%     \big[\bm{J}_i\big]_{k,l} = \bm{\Sigma}_{B_{i-1}}^{(k,l)}\bm{u}_i \in \mathbb{R}^{N},
+%     \qquad
+%     \big[\bm{\Phi}_i\bm{\Sigma}_{B_{i-1}}\bm{\Phi}_i^\top\big]_{kl} = \bm{u}_i^\top \bm{\Sigma}_{B_{i-1}}^{(k,l)}\bm{u}_i,
+% \end{align*}
+% so a trial costs $K^2$ matrix-vector products of size $N\times N$ and one $K\times K$ solve.
+
+% \paragraph{One-trial-ahead trace.}
+% For a candidate $\bm{u} = \mathrm{softplus}(\bm{V}\bm{s}+\bm{b})$, write $\bm{\Phi}(\bm{u}) = \bm{I}_K\otimes\bm{u}^\top$,
+% $\bm{J}(\bm{u}) = \bm{\Sigma}_{B_i}\bm{\Phi}(\bm{u})^\top$ and
+% $\bm{S}(\bm{u}) = \bm{\Phi}(\bm{u})\bm{\Sigma}_{B_i}\bm{\Phi}(\bm{u})^\top + \bm{R}_i$. Using
+% $\mathrm{tr}(\bm{J}\bm{S}^{-1}\bm{J}^\top) = \mathrm{tr}(\bm{S}^{-1}\bm{J}^\top\bm{J})$,
+% \begin{align*}
+%     \mathrm{tr}\big(\bm{\Sigma}_{B_{i+1}}\big)
+%         = \mathrm{tr}\big(\bm{\Sigma}_{B_i}\big) - \mathrm{tr}\Big(\bm{S}(\bm{u})^{-1}\,\bm{J}(\bm{u})^\top\bm{J}(\bm{u})\Big),
+% \end{align*}
+% where the $K\times K$ Gram matrix has entries
+% \begin{align*}
+%     \big[\bm{J}^\top\bm{J}\big]_{lm} = \sum_{k=1}^{K}\big(\bm{\Sigma}_{B_i}^{(k,l)}\bm{u}\big)^\top\big(\bm{\Sigma}_{B_i}^{(k,m)}\bm{u}\big).
+% \end{align*}
+% The updated covariance never has to be formed to score a candidate. The selection rule is
+% \begin{align*}
+%     \boxed{\;
+%     \bm{s}_{i+1}^{*} = \arg\max_{\bm{s}\in\{0,1\}^N,\ \|\bm{s}\|_0 \le 8}\;
+%         \mathrm{tr}\Big(\bm{S}(\bm{u})^{-1}\,\bm{J}(\bm{u})^\top\bm{J}(\bm{u})\Big),
+%     \qquad \bm{u} = \mathrm{softplus}(\bm{V}\bm{s}+\bm{b}).\;}
+% \end{align*}
+
+% \paragraph{Consistency check.}
+% If $\bm{\Sigma}_{B_i}$ is block diagonal and $\bm{R}_i$ is diagonal, then $\bm{J}$ has only
+% diagonal blocks, $\bm{J}^\top\bm{J} = \mathrm{diag}\big(\|\hat{\bm{\Sigma}}_{B_i}^{(k)}\bm{u}\|_2^2\big)$,
+% $\bm{S}$ is diagonal with entries $c_{i,k} = \bm{u}^\top\hat{\bm{\Sigma}}_{B_i}^{(k)}\bm{u} + r_{i,k}$, and the
+% criterion collapses to the per-row form
+% $\sum_k \|\hat{\bm{\Sigma}}_{B_i}^{(k)}\bm{u}\|_2^2 / c_{i,k}$, with $c_{i,k}$ as defined in the previous
+% section. Worth keeping as a unit test on the implementation.
+
+% \paragraph{Cost.}
+% Storage is $NK\times NK$: at $N = 128$, $K = 4$ this is $512\times512$, a few megabytes and a
+% millisecond-scale Cholesky; at $K = 15$ it is $1920\times1920$, still comfortable in the
+% between-trial window. Since the update needs no inverse beyond $K\times K$, the full
+% representation is affordable here, and the row-independence approximation of the previous section is a
+% modeling choice rather than a computational necessity. Numerically, propagate a Cholesky factor of
+% $\bm{\Sigma}_{B_i}$ (or symmetrize after each downdate) to keep the repeated rank-$K$
+% subtractions from losing positive definiteness.
+
+% \inlinecomment{Whiteboard: trace is scale dependent --- rows with large $\sigma_k$ dominate. Consider normalizing per row before summing.}
+% \inlinecomment{Answers TODO item 5 (do we need NK x NK?): yes, and it is cheap; only the search over s is expensive.}
+
+\clearpage
+\subsection*{Choosing the next stimulation pattern $\bm{s}_{i+1}$}
+\phantomsection{\label{sec:stim_selection}}
+
+Both criteria reduce to maximizing a set function of the binary pattern $\bm{s}\in\{0,1\}^N$
+subject to a sparsity budget, with the nonlinearity $\bm{u} = \mathrm{softplus}(\bm{V}\bm{s}+\bm{b})$
+in between:
+\begin{align*}
+    \bm{s}_{i+1}^{*} = \arg\max_{\|\bm{s}\|_0 \le 8}\; f(\bm{u}(\bm{s})),
+    \qquad
+    f_{\mathrm{D}} = \sum_{k}\log\big(1+\rho_{i,k}\big),
+    \qquad
+    f_{\mathrm{A}} = \mathrm{tr}\big(\bm{S}^{-1}\bm{J}^\top\bm{J}\big).
+\end{align*}
+Exhaustive search is $\binom{N}{8}$ and out of reach, so:
+\begin{itemize}[itemsep=0em, topsep=0.2em]
+    \item \textbf{Greedy}: add the single channel with the largest marginal gain, recompute, repeat 8 times. $\log\det$ objectives of this form are submodular in the selected set, so greedy carries the standard $(1-1/e)$ guarantee; the trace objective does not in general.
+    \item \textbf{Projected / proximal descent}: relax $\bm{s}$ to $[0,1]^N$ and descend, projecting to the sparse binary set either at the end (projected) or at each step (proximal).
+    \item Both need the $\bm{V}$ spread matrix and softplus in the chain rule, since neighbouring channels are not independent knobs.
+\end{itemize}
+The gradient of $f_{\mathrm{D}}$ with respect to $\bm{u}$ is available in closed form,
+$\nabla_{\bm{u}} f_{\mathrm{D}} = \sum_k \frac{2\,\hat{\bm{\Sigma}}_{B_i}^{(k)}\bm{u}}{\bm{u}^\top\hat{\bm{\Sigma}}_{B_i}^{(k)}\bm{u} + r_{i,k}}$,
+which makes the relaxed problem cheap.
+
+\subsubsection*{Superseded: earlier precision-form sketch}
+\inlinecomment{Kept for reference. This version treated the information increment as $\beta\,\mathbb{E}[\Delta]\mathbb{E}[\Delta]^\top$, which measures the size of the expected perturbation rather than the reduction in posterior uncertainty, and needed a free scaling $\beta$. Superseded by the two criteria above.}
+For adaptive selection, before each trial $i+1$ we want $\bm{u}_{i+1}$ maximizing the expected
+information gain about $\bm{B}$, i.e.\ minimizing the determinant of the covariance of $\bm{B}$
+after trial $i+1$. Writing $\boldsymbol{\Delta}_{i+1} = \bm{B}\bm{u}_{i+1}$ for the induced latent
+perturbation and $\beta$ for how the data is scaled relative to the prior, the precision form is
 \begin{equation*}
     \boldsymbol{\Sigma}_{B_{i+1|i}}^{-1} = \boldsymbol{\Sigma}_{B_{i|i}}^{-1}
-    + \beta \; \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}] 
-               \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]^\top
+    + \beta \; \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{u}_{i+1}]
+               \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{u}_{i+1}]^\top,
 \end{equation*}
-Taking the determinant and applying the matrix determinant lemma:
+and the matrix determinant lemma plus $\mathbb{E}[\boldsymbol{\Delta}_{i+1}\mid\bm{u}_{i+1}] = \hat{\bm{B}}_i\bm{u}_{i+1}$
+gives the objective
 \begin{align*}
-    \det\boldsymbol{\Sigma}_{B_{i+1|i}}^{-1} 
-    &= \det\!\Big(\boldsymbol{\Sigma}_{B_{i|i}}^{-1}
-       + \beta\,\mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]
-                \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]^\top\Big) \\
-    &= \Big(1 + \beta\,\mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]^\top
-       \boldsymbol{\Sigma}_{i}^{B}\,
-       \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]\Big)
-       \det\!\big(\boldsymbol{\Sigma}_{B_{i|i}}^{-1}\big)
-\end{align*}
-Since we minimize over $\bm{s}_{i+1}$, the objective function is therefore:
-\begin{align*}
-    \arg\max_{\bm{s}}\;\det\big(\boldsymbol{\Sigma}_{B_{i+1|i}}^{-1}\big)
-    &= \arg\max_{\bm{s}}\;\Big(1 + \beta\,\mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]^\top
-       \boldsymbol{\Sigma}_{i}^{B}\,
-       \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]\Big)
-       \det\!\big(\boldsymbol{\Sigma}_{B_{i|i}}^{-1}\big) \\
-    &= \arg\max_{\bm{s}}\;\beta\,\mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]^\top
-       \boldsymbol{\Sigma}_{i}^{B}\,
-       \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}]
-\end{align*}
-We can further expand out the expected perturbation in latent space:
-\begin{align*}
-    \mathbb{E}[\boldsymbol{\Delta}_{i+1} \mid \bm{s}_{i+1}] 
-    = \bm{\hat{B}}_{i}\bm{s}_{i+1}
-\end{align*}
-where $\bm{\hat{B}}_{i}$ is estimated from trials $1,\ldots,i$, giving the 
-final objective:
-\begin{align*}
-    \arg\max_{\bm{s}}\;\beta\,
-    \bm{s}_{i+1}^\top \bm{\hat{B}}_{i}^\top
+    \arg\max_{\bm{u}}\;\beta\,
+    \bm{u}_{i+1}^\top \hat{\bm{B}}_{i}^\top
     \boldsymbol{\Sigma}_{i}^{B}\,
-    \bm{\hat{B}}_{i}\bm{s}_{i+1}
+    \hat{\bm{B}}_{i}\bm{u}_{i+1}.
 \end{align*}
+
 \clearpage
 \subsection*{TODO}
 \begin{enumerate}
@@ -596,127 +1221,18 @@ final objective:
     \item We will need to analyze our \hyperref[sec:convergence_criterion]{\textbf{convergence criterion}} and if we need an algorithm that is quicker / more accurate. (Low rank prior of loading matrix, instead of a state-space formulation): %we may consider online variational inference or ..
     % Take the nuclear norm and then max min (E optimality)
     % max min singular value of precision
-    \item We also want a \hyperref[sec:kalman_update]{\textbf{Kalman-like update}} of the measurement equation parameters ($\bm{C}$ and $\bm{d}$)
     \item Might need a \textbf{greedy search} for the acquisition function to not focus on the same noisy channels repeatedly.
     \item This is for one timepoint, don't worry too much about some kind of t to t+k information update, before deciding on the next step, where t+k is the next stim LINOCS?
-    \item Need to expand to KxN for the precision matrix, instead of a K x K matrix. Current formulation gives you which latent to stim, which gives you probably channels just based on its contribution/composition of the latents
+    \item Do we need to expand to NKxNK for the precision matrix? instead of a K X N x N matrix.
     \item Tried fitting the PLDS with a step term ($\bm{C}\times \text{step}(t)$) before, but doesn't seem to do well.
     \item Try to find closed form after plugging in $\mathbb{E}\!\left[\bm{B}\right]$?
+    \item Compare A-optimal (full covariance) against D-optimal (per row) in simulation --- note the two scores are not on a common scale, so compare recovery of $\bm{B}$, not objective values.
+    \item Use the RTS lag-one cross-covariance in $\bm{R}_i$ rather than dropping it.
 \end{enumerate}
 \begin{itemize}
-    \item Since s is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\bm{s}$
+    \item Since s is Bernoulli (discrete), projected or coordinate or proximal descent to solve for $\bm{u}$
     \item Projected is projecting the final to discrete, proximal is projecting each step
 \end{itemize}
-% \begin{enumerate}
-%     \item The combinatorial constraint makes \eqref{eq:acquisition} NP-hard in general;
-%           a greedy column-selection or semidefinite relaxation may be needed.
-%     \item Without an explicit exploration bonus the acquisition will repeatedly select
-%           the same high-variance channels once $\hat{\bm{B}}_{i|i} \neq \bm{0}$;
-%           a UCB-style term $+\lambda\,\bm{s}^\top\boldsymbol{\hat\Sigma}_{B_{i|i}}\bm{s}$
-%           can balance exploration and exploitation.
-% \end{enumerate}
-
-% \begin{SCfigure}[1][h!]
-%     \includegraphics[width=0.4\textwidth]{fig1.png}
-%     \caption{At slackness = 0.5 of the dual variable $\lambda_{1}$, there are two optimal experiments}
-%     \label{fig1}
-% \end{SCfigure}
-
-% \subsection*{D-Optimal experiments}
-% For adaptive selection of stimulation patterns, at each trial $t$, we want to select $x_t$ that maximizes the expected information gain about $W$. We formalize this using D-optimal experimental design, where we minimize the log-determinant of the Fisher information matrix. That is, we want to minimize the volume of the confidence ellipsoids for a fixed confidence level. First, we derive the Poisson Fisher information matrix.
-
-% \subsection*{Derivation of the Poisson Fisher information matrix}
-% Let $\theta \in \mathbb{R}^{K\times N}$ denote the vectorized version of $W$ (e.g.\ $\theta=\mathrm{vec}(W)$). This is essentially the list of unknown parameters.
-% Assume conditionally independent observations (responses) $\{r_j\}_{j=1}^M$ with
-% \[
-% r_j \mid \theta \sim \mathrm{Poisson}\big(\lambda_j(\theta)\big),
-% \qquad \lambda_j(\theta) \ge 0
-% \]
-
-% The latent variables are $z_{k} = W_{ki}x_{i}$, and the mean firing rate at recording channel $j$ is:
-% \[
-% \lambda_j(\theta)
-% = \sum_{k=1}^K D_{jk} z_k + \lambda_j^{control}
-% = \sum_{k=1}^K \sum_{i=1}^N D_{jk} W_{ki} x_i + \lambda_j^{control}
-% \]
-
-% \subsection*{Score function}
-% The score function is the gradient of the likelihood relative to the parameters. 
-% The log-likelihood for a single trial $t$ is:
-% \[
-% \ell(\theta)
-% = \sum_{j=1}^M \left(
-% r_j \log \lambda_j(\theta)
-% - \lambda_j(\theta)
-% - \log(r_j!)
-% \right)
-% \]
-
-% Differentiating the MLE with respect to $\theta$ gives
-% \[
-% \nabla_\theta \ell(\theta)
-% = \sum_{j=1}^M
-% \left(
-% \frac{r_j}{\lambda_j(\theta)} - 1
-% \right)
-% \nabla_\theta \lambda_j(\theta) \quad \text{by chain rule.}
-% \]
-
-% \subsection*{Fisher information}
-% The Fisher information matrix is the  for a single trial $t$ is
-% \[
-% \mathcal{I}(\theta)
-% := \mathbb{E}\left[
-% \nabla_\theta \ell(\theta)
-% \nabla_\theta \ell(\theta)^\top
-% \,\middle|\, \theta
-% \right]
-% \]
-
-% Since $\{r_j\}_{j=1}^M$ are independent given theta, we use the identity
-% \[
-% \mathbb{E}\left[
-% \left(
-% \frac{r_j}{\lambda_j} - 1
-% \right)^2
-% \right]
-% = \frac{1}{\lambda_j}
-% \]
-% {\centering we obtain\par}
-% \[
-% \boxed{
-% \mathcal{I}(\theta)
-% = \sum_{j=1}^M
-% \frac{1}{\lambda_j(\theta)}
-% \nabla_\theta \lambda_j(\theta)\nabla_\theta \lambda_j(\theta)^\top
-% }
-% \quad \text{with dimension } \mathbb{R}^{KN \times KN}
-% \]
-
-% Because: 
-% \[
-% \frac{\partial \lambda_j}{\partial W_{ki}}
-% = D_{jk} x_i
-% \quad
-% \text{and}
-% \quad
-% \nabla_\theta \lambda_j(\theta) = \frac{\partial \lambda_j}{\partial \theta}
-% = x \otimes D_{j,:} 
-% \in \mathbb{R}^{KN}
-% \]
-% {\centering where $D_{j,:}$ is the $j$th row of $D$. \par}
-
-% Assuming each trial is independent, the total Fisher information is additive:
-% \[
-% \mathcal{I}_T(\theta)
-% = \sum_{t=1}^T \mathcal{I}(\theta)
-% \]
-% \subsection*{Optimization objective}
-% Although Fisher information is with respect to W, the parameter we want to optimize is the choice of x.
-% \begin{equation}
-% \text{argmin}_{x \in \{0, 1\}}
-% -\log \det\bigl( \mathcal{I}_{1:t-1} + \mathcal{I}_t(x) \bigr)
-% \end{equation}
 
 \clearpage
 \section*{Random Sampling Stopgap}
@@ -729,144 +1245,6 @@ final objective:
     \item Collect all the data and responses and see if we can predict in a leave-one-out approach (use all but one response). 
     \item Benefit of random sampling is that we can collect now before Nike's implant comes out.
 \end{itemize}
-
-\clearpage
-\subsection*{Online update loop (trial $i \geq 1$)}
-
-At the end of each trial $i$, the following steps are performed in order:
-
-\begin{enumerate}
-
-\item \textbf{EKF forward pass + RTS smoother.}
-Run the EKF forward over $\bm{y}_{i,1:T}$ with $\hat{\boldsymbol{\theta}}_{i-1}$ fixed,
-then run the RTS smoother backward:
-\begin{align*}
-    \text{Filtered:} \quad  &\hat{\bm{x}}_{i,t|t} = \hat{\bm{x}}_{i,t|t-1}
-        + \bm{K}_{i,t}(\bm{y}_{i,t} - \boldsymbol{\lambda}_{i,t|t-1}), \quad
-        \bm{P}_{i,t|t} = (\bm{I} - \bm{K}_{i,t}\bm{H}_{i,t})\bm{P}_{i,t|t-1} \\
-    \text{Smoothed:} \quad  &\hat{\bm{x}}_{i,t|T} = \hat{\bm{x}}_{i,t|t}
-        + \bm{G}_{i,t}(\hat{\bm{x}}_{i,t+1|T} - \hat{\bm{x}}_{i,t+1|t}), \quad
-        \bm{P}_{i,t|T} = \bm{P}_{i,t|t}
-        + \bm{G}_{i,t}(\bm{P}_{i,t+1|T} - \bm{P}_{i,t+1|t})\bm{G}_{i,t}^\top
-\end{align*}
-where $\bm{G}_{i,t} = \bm{P}_{i,t|t}\bm{A}^\top\bm{P}_{i,t+1|t}^{-1}$
-is the smoother gain and $\bm{P}_{i,t,t-1|T} = \bm{P}_{i,t|t}\bm{G}_{i,t-1}^\top$
-is the lag-one cross-covariance needed for the M-steps below.
-
-\item \textbf{Closed-form update $\bm{A}$, $\bm{Q}$ (online EM M-step)}
-Exclude $t = t_{\mathrm{stim}}$ to avoid absorbing the stim kick into $\bm{A}$:
-\begin{align*}
-    \hat{\bm{A}}_i
-        &\leftarrow \left(\sum_{\substack{t=2 \\ t \neq t_{\mathrm{stim}}}}^{T}
-            \bm{P}_{i,t,t-1|T} + \hat{\bm{x}}_{i,t|T}\hat{\bm{x}}_{i,t-1|T}^\top
-            \right)
-            \left(\sum_{\substack{t=2 \\ t \neq t_{\mathrm{stim}}}}^{T}
-            \bm{P}_{i,t-1|T} + \hat{\bm{x}}_{i,t-1|T}\hat{\bm{x}}_{i,t-1|T}^\top
-            \right)^{-1} \\[4pt]
-    \hat{\bm{Q}}_i
-        &\leftarrow \frac{1}{T-2}\sum_{\substack{t=2 \\ t \neq t_{\mathrm{stim}}}}^{T}
-            \left[\bm{P}_{i,t|T}
-            + \hat{\bm{x}}_{i,t|T}\hat{\bm{x}}_{i,t|T}^\top
-            - \hat{\bm{A}}_i\!\left(
-            \bm{P}_{i,t,t-1|T}^\top
-            + \hat{\bm{x}}_{i,t-1|T}\hat{\bm{x}}_{i,t|T}^\top
-            \right)\right]
-\end{align*}
-
-\item \textbf{SGD update $\bm{C}$, $\bm{d}$.}
-Take one gradient step on the single-trial EKF marginal log-likelihood
-$\mathcal{L}_i = \sum_{t=1}^{T} \log\mathcal{N}(\bm{y}_{i,t} \mid
-\boldsymbol{\lambda}_{i,t|t-1}, \bm{S}_{i,t})$:
-\begin{align*}
-    (\hat{\bm{C}}_i,\, \hat{\bm{d}}_i)
-        \leftarrow (\hat{\bm{C}}_{i-1},\, \hat{\bm{d}}_{i-1})
-        - \eta_i\, \nabla_{\bm{C},\bm{d}}\,
-          \bigl[-\mathcal{L}_i(\hat{\boldsymbol{\theta}}_{i-1})\bigr]
-\end{align*}
-where $\eta_i \propto 1/i$ is a decaying learning rate.
-
-\item \textbf{Update $\bm{B}$ (trial-level Kalman two-step).}
-Using the freshly updated $\hat{\bm{A}}_i$, $\hat{\bm{Q}}_i$, $\hat{\bm{C}}_i$,
-$\hat{\bm{d}}_i$ from steps 2--3.
-
-\textit{Predict} — propagate $\bm{B}$ uncertainty from trial $i-1$ to $i$, using
-the RTS-smoothed covariance $\bm{P}_{i-1,\,t_{\mathrm{stim}}-1|T}$ from the
-previous trial (tighter than the filtered covariance since it uses all $T$ observations):
-\begin{align*}
-    \boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-        \leftarrow \boldsymbol{\hat\Sigma}_{B_{i-1|i-1}}\,\bm{s}_i\bm{s}_i^\top
-           + 2\,\hat{\bm{A}}_i\,\bm{P}_{i-1,\,t_{\mathrm{stim}}-1|T}\,\hat{\bm{A}}_i^\top
-           + 2\,\hat{\bm{Q}}_i
-\end{align*}
-
-\textit{Update} — condition on $\bm{y}_{i,\,t_{\mathrm{stim}}}$ via EKF linearization
-using $\hat{\bm{C}}_i$, $\hat{\bm{d}}_i$:
-\begin{align*}
-    \bm{K}_i^B
-        &= \boldsymbol{\hat\Sigma}_{B_{i|i-1}}\,\bm{s}_i\,
-           \bm{H}_{i,t_{\mathrm{stim}}}^\top\!\left(
-           \bm{H}_{i,t_{\mathrm{stim}}}\,\boldsymbol{\hat\Sigma}_{B_{i|i-1}}\,
-           \bm{s}_i\bm{s}_i^\top\bm{H}_{i,t_{\mathrm{stim}}}^\top
-           + \mathrm{diag}(\boldsymbol{\lambda}_{i,t_{\mathrm{stim}}})^{-1}
-           \right)^{-1} \\[4pt]
-    \hat{\bm{B}}_{i|i}
-        &\leftarrow \hat{\bm{B}}_{i|i-1}
-           + \bm{K}_i^B\!\left(\bm{y}_{i,\,t_{\mathrm{stim}}}
-           - \boldsymbol{\lambda}_{i,t_{\mathrm{stim}}}\right)\bm{s}_i^\top \\[4pt]
-    \boldsymbol{\hat\Sigma}_{B_{i|i}}
-        &\leftarrow \left(\bm{I} - \bm{K}_i^B\,
-           \bm{H}_{i,t_{\mathrm{stim}}}\,\bm{s}_i\bm{s}_i^\top\right)
-           \boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-\end{align*}
-
-\item \textbf{Select next stimulation pattern.}
-\begin{align*}
-    \bm{s}_{i+1}^*
-        = \arg\max_{\bm{s}\,\in\,\{0,1\}^N,\;\|\bm{s}\|_0\,=\,k}
-          \;\bm{s}^\top \hat{\bm{B}}_{i|i}^\top\,
-          \boldsymbol{\hat\Sigma}_{B_{i|i}}\,
-          \hat{\bm{B}}_{i|i}\,\bm{s}
-\end{align*}
-
-
-Steps 2 and 3 are decoupled: $\bm{B}$ is updated via the Kalman mechanism and 
-$\boldsymbol{\theta} \setminus \bm{B}$ via SGD, both conditioned on the same EKF pass 
-from step 1. This introduces an approximation: the EKF in step 1 is run under 
-$\bm{\hat{B}}_{i-1|i-1}$, so the filtered states used in step 2 reflect the previous 
-trial's $\bm{B}$ estimate rather than the current one.
-
-\end{enumerate}
-
-\subsection*{Posterior for $\bm{B}$ and predict covariance derivation}
-
-We treat $\bm{B}$ as a random variable and factorize across $\boldsymbol{\theta}$
-components (analogous to CAVI), treating $\hat{\boldsymbol{\theta}}_{i-1} \setminus
-\bm{B}$ as fixed. The posterior after $i-1$ trials is approximated as Gaussian:
-\begin{align*}
-    p(\bm{B} \mid \bm{y}_{1:i-1}, \bm{s}_{1:i-1})
-        \approx \mathcal{N}(\hat{\bm{B}}_{i-1|i-1},\,\boldsymbol{\hat\Sigma}_{B_{i-1|i-1}})
-\end{align*}
-The Poisson emission is non-Gaussian so each update is approximated via EKF linearization
-at $t_{\mathrm{stim}}$, maintaining the Gaussian form across trials.
-
-\paragraph{Derivation of the predict covariance.}
-Rearranging the dynamics at $t_{\mathrm{stim}}$ to isolate the $\bm{B}$ contribution:
-\begin{align*}
-    \hat{\bm{B}}_{i|i-1}\,\bm{s}_i
-        &= \hat{\bm{x}}_{i,\,t_{\mathrm{stim}}|t_{\mathrm{stim}}-1}
-           - \hat{\bm{A}}_i\,\hat{\bm{x}}_{i,\,t_{\mathrm{stim}}-1|t_{\mathrm{stim}}-1}
-           - \boldsymbol{\epsilon}_{t_{\mathrm{stim}}}
-\end{align*}
-Taking the covariance, using
-$\mathrm{Cov}(\hat{\bm{B}}_{i-1|i-1}\bm{s}_i) =
-\boldsymbol{\hat\Sigma}_{B_{i-1|i-1}}\bm{s}_i\bm{s}_i^\top$ (derived below)
-and ignoring $\mathrm{Cov}(\hat{\bm{A}})$:
-\begin{align*}
-    \boldsymbol{\hat\Sigma}_{B_{i|i-1}}
-        \approx \boldsymbol{\hat\Sigma}_{B_{i-1|i-1}}\,\bm{s}_i\bm{s}_i^\top
-        + 2\,\hat{\bm{A}}_i\,\bm{P}_{i-1,\,t_{\mathrm{stim}}-1|T}\,\hat{\bm{A}}_i^\top
-        + 2\,\hat{\bm{Q}}_i
-\end{align*}
 
 \vspace{-1cm}
 \end{document}
