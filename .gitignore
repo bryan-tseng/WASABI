@@ -4,3 +4,10 @@ __pycache__/
 figures/
 results/
 .vscode/
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

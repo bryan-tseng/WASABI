@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.linalg import expm
 
-from .utils import make_toeplitz_V, softplus_np, effective_stim_input
+from .utils import effective_stim_input, make_toeplitz_V, softplus_np
 
 
 def make_ground_truth_params(K=4, N=128, spectral_radius=0.9, sigma2_Q=0.2, sigma2_C=1.0, w=3.0, b_input=0.8, B_scale=5.0, seed=0, identity_V=True):
@@ -126,7 +126,8 @@ def simulate_trial(params, T, stim_channels, t_stim, n_stim_bins, rng, softplus_
         t_stim (int): Timestep at which stimulation is delivered.
         n_stim_bins (int): Number of bins over which stimulation is delivered.
         rng (np.random.Generator):
-        softplus_beta (float, optional): Sharpness of the softplus link; larger values approach a ReLU
+        softplus_beta_stim (float, optional): Sharpness of the stim softplus; larger values approach a ReLU
+        softplus_beta_emit (float, optional): Sharpness of the observation softplus link
 
     Returns:
         tuple: A tuple `(x, y, s)` where:
@@ -156,7 +157,7 @@ def simulate_trial(params, T, stim_channels, t_stim, n_stim_bins, rng, softplus_
     L_Q = np.linalg.cholesky(Q) # If Q is diagonal, its L_Q
 
     for t in range(T):
-        stim_input = B @ effective_stim_input(s[t], V, b, softplus_beta_stim, identity=True) # Get stim input
+        stim_input = B @ effective_stim_input(s[t], V, b, softplus_beta_stim) # Get stim input
 
         eps = L_Q @ rng.standard_normal(K) # Sample noise using Cholesky factor
         x_t = A @ x_prev + stim_input + eps # state equation
@@ -221,7 +222,7 @@ def simulate_perturbation(params, time_vec, stim_channels, rng,
 
     Args:
         params (dict): ground-truth PLDS parameters
-        time_vec (dict): from make_trial_timebase
+        time_vec (dict): from make_timevec
         stim_channels (np.ndarray): channel indices to stimulate
         rng (np.random.Generator)
 
