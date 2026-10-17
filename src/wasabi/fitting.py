@@ -1,4 +1,4 @@
-"""Fitting the StateSpaceModel parameters (A, C, d, Q, b by default) with B held fixed.
+"""Fitting the StateSpaceModel parameters (A, C, d, Q, b and the stim-response variance by default) with B held fixed.
 
 Each step is an optax update on the masked EKF marginal likelihood followed by
 `StateSpaceModel.project` for your constraints
@@ -25,6 +25,7 @@ REFIT_FIELDS = (
     "dynamics.A",
     "dynamics.Q_chol",
     "dynamics.b",
+    "dynamics.log_stim_var",
     "observation.C",
     "observation.d",
 )
@@ -96,23 +97,26 @@ def negative_loglik(
     model: StateSpaceModel,
     B: Array,
     buffer: TrialBuffer,
+    B_cov: Array | None = None,
 ) -> Array:
     """
     Masked EKF marginal negative log likelihood per kept bin. This is our loss.
     in_axes=(None, None, 0, 0, 0) flags model and B as static and broadcast across trials
     y, s, and keep, which are (T, N) per trial
     Hence the negll is averaged over trials
+    B_cov, the posterior covariance of vec(B), is added to the noise of stim bins so that
+    B's own uncertainty is not mistaken for trial-to-trial stim variability.
     """
-    loglik, *_ = jax.vmap(filter_latents, in_axes=(None, None, 0, 0, 0))(
-        model, B, buffer.ys, buffer.ss, buffer.keep
+    loglik, *_ = jax.vmap(filter_latents, in_axes=(None, None, 0, 0, 0, None))(
+        model, B, buffer.ys, buffer.ss, buffer.keep, B_cov
     )
     num_bins = jnp.maximum((buffer.keep & buffer.valid[:, None]).sum(), 1)
     return -jnp.where(buffer.valid, loglik, 0.0).sum() / num_bins
 
 
 @eqx.filter_jit
-def _loss(diff_model, static_model, B, buffer):
-    return negative_loglik(eqx.combine(diff_model, static_model), B, buffer)
+def _loss(diff_model, static_model, B, buffer, B_cov):
+    return negative_loglik(eqx.combine(diff_model, static_model), B, buffer, B_cov)
 
 
 @eqx.filter_jit
@@ -123,11 +127,12 @@ def _step(
     buffer: TrialBuffer,
     optimizer: optax.GradientTransformation,
     fields: tuple[str, ...],
+    B_cov: Array | None,
 ):
     diff_model, static_model = eqx.partition(model, trainable_spec(model, fields))
     # Split into trainable vs static for jit
     loss, grads = eqx.filter_value_and_grad(_loss)(
-        diff_model, static_model, B, buffer
+        diff_model, static_model, B, buffer, B_cov
     )
     updates, opt_state = optimizer.update(grads, opt_state, diff_model)
     model = eqx.apply_updates(model, updates).project()
@@ -151,11 +156,13 @@ def refit(
     optimizer: optax.GradientTransformation,
     num_steps: int,
     fields: tuple[str, ...] = REFIT_FIELDS,
+    B_cov: Array | None = None,
 ) -> tuple[StateSpaceModel, optax.OptState, Array]:
-    """Warm-started refit of `fields` on all trials in `buffer`, with B fixed."""
+    """Warm-started refit of `fields` on all trials in `buffer`, with B fixed (see
+    `negative_loglik` for `B_cov`)."""
     losses = []
     for _ in range(num_steps):
-        model, opt_state, loss = _step(model, opt_state, B, buffer, optimizer, fields)
+        model, opt_state, loss = _step(model, opt_state, B, buffer, optimizer, fields, B_cov)
         losses.append(loss)
 
     return model, opt_state, jnp.array(losses)
@@ -204,7 +211,7 @@ def fit_batch(
     for _ in range(num_iters):
         _, posterior = filter_trials(model, prior, Ys, Ss, keep)
         model, opt_state, iter_losses = refit(
-            model, opt_state, posterior.B, buffer, optimizer, refit_steps, fields
+            model, opt_state, posterior.B, buffer, optimizer, refit_steps, fields, posterior.cov
         )
         losses.append(iter_losses)
 

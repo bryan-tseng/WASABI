@@ -4,7 +4,7 @@ Only the x rows of the augmented transition are non-trivial,
 
     F_x = [A, u_t^T kron I_K],
     F_B = [0, I_KN],
-    Q~ = blockdiag(Q, 0),
+    Q~ = blockdiag(Q(s_t), 0),
 
 so `predict` only updates the x rows and columns of the covariance; the B block is
 unchanged because B is constant and has no process noise.
@@ -89,7 +89,7 @@ def predict(model: StateSpaceModel, mean: Array, cov: Array, s: Array) -> tuple[
     x_pred = model.transition(mean[:K], unvec(mean[K:], K), s)
     FP = A_U @ cov  # (K, K + NK)
     cov = cov.at[:K, :].set(FP).at[:, :K].set(FP.T) # Write top K rows and K columns
-    cov = cov.at[:K, :K].set(FP @ A_U.T + model.Q) # Include process noise in top left block
+    cov = cov.at[:K, :K].set(FP @ A_U.T + model.process_noise(s)) # Include process noise in top left block
     return mean.at[:K].set(x_pred), symmetrize(cov)
 
 

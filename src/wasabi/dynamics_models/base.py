@@ -11,7 +11,7 @@ from wasabi.utils import stim_nonlinearity
 class DynamicsModel(eqx.Module):
     """Latent dynamics with an additive stim term:
 
-        x_t = f(x_{t-1}) + B u(s_t) + eps_t, eps_t ~ N(0, Q)
+        x_t = f(x_{t-1}) + B u(s_t) + eps_t, eps_t ~ N(0, process_noise(s_t))
         u(s) = stim_nonlinearity(apply_stim_kernel(s), b)
 
     B is not a field: it is either tracked by the joint filter or passed in fixed. It
@@ -32,6 +32,10 @@ class DynamicsModel(eqx.Module):
     @abstractmethod
     def Q(self) -> Array:
         raise NotImplementedError
+
+    def process_noise(self, s: Array) -> Array:
+        """Covariance of eps_t given the stim s_t. Defaults to Q; override to let stim add noise."""
+        return self.Q
 
     @abstractmethod
     def propagate(self, x: Array) -> Array:

@@ -29,13 +29,14 @@ def observe_trial(
 
     1. Runs the joint EKF over [x; vec(B)] with the dynamics fixed to get the posterior over B.
     2. Add a trial to the buffer.
-    3. Refits A, C, d, Q, b on every trial in the trial buffer with B fixed at its posterior mean.
+    3. Refits A, C, d, Q, b and the stim variance on every trial in the trial buffer with B fixed
+       at its posterior mean; its posterior covariance is counted as extra noise in stim bins.
     4. Re-expresses the B posterior in the refit latent basis.
     """
     _, prior, _ = filter_trial(model, prior, ys, ss, keep)
     buffer = buffer.add(ys, ss, keep)
     refit_model, opt_state, losses = refit(
-        model, opt_state, prior.B, buffer, optimizer, refit_steps, refit_fields
+        model, opt_state, prior.B, buffer, optimizer, refit_steps, refit_fields, prior.cov
     )
     prior = prior.realign(refit_model.basis_change(model))
 

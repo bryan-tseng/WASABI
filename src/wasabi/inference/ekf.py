@@ -61,12 +61,28 @@ def ekf_update(
     )
 
 
+def stim_effect_cov(B_cov: Array, u: Array) -> Array:
+    """Covariance of B u when vec(B) has covariance B_cov: (uᵀ ⊗ I_K) B_cov (u ⊗ I_K)."""
+    N = u.shape[0]
+    K = B_cov.shape[0] // N
+    return jnp.einsum("n, nimj, m -> ij", u, B_cov.reshape(N, K, N, K), u)
+
+
 def predict(
-    model: StateSpaceModel, mean: Array, cov: Array, B: Array, s: Array
+    model: StateSpaceModel,
+    mean: Array,
+    cov: Array,
+    B: Array,
+    s: Array,
+    B_cov: Array | None = None,
 ) -> tuple[Array, Array]:
-    # Predictive mean and covariance
+    """Predictive mean and covariance. With `B_cov`, B's uncertainty is added to the
+    process noise of stim bins, treating it as independent from bin to bin."""
     A = model.jacobian(mean)
-    return model.transition(mean, B, s), symmetrize(A @ cov @ A.T + model.Q)
+    Q = model.process_noise(s)
+    if B_cov is not None:
+        Q = Q + stim_effect_cov(B_cov, model.stim_input(s))
+    return model.transition(mean, B, s), symmetrize(A @ cov @ A.T + Q)
 
 
 @eqx.filter_jit
@@ -76,8 +92,9 @@ def filter_latents(
     ys: Array,
     ss: Array,
     keep: Array,
+    B_cov: Array | None = None,
 ) -> tuple[Array, Array, Array, Array, Array]:
-    """Latent-only filter with B held fixed.
+    """Latent-only filter with B held fixed, at its posterior mean if `B_cov` is given.
 
     Returns (loglik, filtered_means, filtered_covs, predicted_means, predicted_covs).
     """
@@ -87,7 +104,7 @@ def filter_latents(
         y, s, k = inputs
         
         # Predict step
-        pred_mean, pred_cov = predict(model, mean, cov, B, s)
+        pred_mean, pred_cov = predict(model, mean, cov, B, s, B_cov)
         ll, mean, cov = ekf_update(model, pred_mean, pred_cov, y, k)
         return (loglik + ll, mean, cov), (mean, cov, pred_mean, pred_cov)
 

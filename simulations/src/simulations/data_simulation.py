@@ -120,7 +120,9 @@ def simulate_trial(params, T, stim_channels, t_stim, n_stim_bins, rng, softplus_
     """Simulate one trial of the PLDS, stimulation happens at one time-step, then samples Poisson spike counts through a softplus link.
 
     Args:
-        params (dict): Ground-truth parameters: A, B, b, C, d, Q, mu0, Sigma0, and V
+        params (dict): Ground-truth parameters: A, B, b, C, d, Q, mu0, Sigma0, and V. An optional
+            "stim_var" (N,) makes the stim response vary across trials: the trial uses
+            B + eta with eta[:, n] ~ N(0, stim_var[n] I_K), drawn once per trial.
         T (int): Number of timesteps
         stim_channels (np.ndarray): Channel indices for stim.
         t_stim (int): Timestep at which stimulation is delivered.
@@ -155,6 +157,10 @@ def simulate_trial(params, T, stim_channels, t_stim, n_stim_bins, rng, softplus_
 
     x_prev = rng.multivariate_normal(mu0, Sigma0)
     L_Q = np.linalg.cholesky(Q) # If Q is diagonal, its L_Q
+
+    # Trial-to-trial jitter of the stim response; drawn only when given, so old seeds reproduce
+    if "stim_var" in params:
+        B = B + rng.standard_normal((K, N)) * np.sqrt(params["stim_var"])
 
     for t in range(T):
         stim_input = B @ effective_stim_input(s[t], V, b, softplus_beta_stim) # Get stim input

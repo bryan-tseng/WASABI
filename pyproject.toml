@@ -38,6 +38,7 @@ dev = [
     "plotly>=7.0.0",
     "pytest>=8",
     "scikit-learn>=1.7.2",
+    "anywidget>=0.11.0",
 ]
 
 [tool.ruff.lint]

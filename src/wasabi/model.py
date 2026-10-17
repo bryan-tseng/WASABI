@@ -29,6 +29,9 @@ class StateSpaceModel(eqx.Module):
     def Q(self) -> Array:
         return self.dynamics.Q
 
+    def process_noise(self, s: Array) -> Array:
+        return self.dynamics.process_noise(s)
+
     @property
     def mu0(self) -> Array:
         return self.dynamics.mu0
