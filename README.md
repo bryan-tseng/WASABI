@@ -13,7 +13,7 @@ Folder structure:
 │       ├── dynamics_models    # DynamicsModel base; LinearDynamics (A, Q, V, b)
 │       ├── observation_models # ObservationModel base; PoissonObservations (C, d)
 │       ├── model.py           # StateSpaceModel(dynamics, observation), make_poisson_lds
-│       ├── inference/ekf.py   # blanking-aware (optionally iterated) EKF; latent filter/smoother
+│       ├── inference/ekf.py   # blanking-aware EKF; latent filter/smoother
 │       ├── inference/joint.py # joint EKF over [x; vec(B)], BPosterior
 │       ├── fitting.py         # refit / fit_initial / fit_batch (EM), TrialBuffer
 │       ├── selection.py       # expected end-of-trial log det, DOptimal / Tile / Random
@@ -75,10 +75,6 @@ Model (see `docs/problem_formulation/joint_ekf.tex`):
    covariance forward. `DOptimal` picks the smallest; `Tile` and `Random` are baselines.
 4. **Recorded data** (`fit_batch`): EM over a fixed set of trials, alternating a joint EKF
    pass over every trial with a refit of A, C, d, Q, b.
-
-The filters use the plain EKF update by default. When stim drives the latents far from
-baseline (strong B, weak loadings), pass `filter_iters > 1` for the iterated EKF, which
-stays stable there and identifies B better (see `scripts/dynamics_simulation.ipynb`).
 
 Run the tests with `uv run pytest`, and the closed-loop simulation with
 `uv run python scripts/joint_ekf_simulation.py`.

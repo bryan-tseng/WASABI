@@ -59,30 +59,6 @@ def test_update_matches_dense_ekf(model):
     np.testing.assert_allclose(cov_upd, (jnp.eye(D) - gain @ H) @ cov, atol=1e-10)
 
 
-def test_iterated_update_finds_posterior_mode(model):
-    mean = jr.normal(jr.key(12), (D,))
-    cov = random_psd(jr.key(13), D)
-    # moderately above the predicted rate: the undamped iteration converges here, but
-    # can oscillate for much larger surprises (e.g. 10x these counts)
-    y = 2.0 * jnp.arange(N, dtype=float)
-
-    _, mean_upd, cov_upd = ekf_update(model, mean, cov, y, jnp.array(True), 50)
-
-    def log_posterior(x):
-        rate = model.rate(x)
-        r = x - mean[:K]
-        return (y * jnp.log(rate) - rate).sum() - 0.5 * r @ jnp.linalg.solve(cov[:K, :K], r)
-
-    x_post = mean_upd[:K]
-    np.testing.assert_allclose(jax.grad(log_posterior)(x_post), 0.0, atol=1e-6)
-    _, mean_ekf, _ = ekf_update(model, mean, cov, y, jnp.array(True))
-    assert log_posterior(x_post) >= log_posterior(mean_ekf[:K])
-    # the rest of the state moves by the Gaussian regression on x
-    gain = cov[K:, :K] @ jnp.linalg.inv(cov[:K, :K])
-    np.testing.assert_allclose(mean_upd[K:], mean[K:] + gain @ (x_post - mean[:K]), rtol=1e-8)
-    assert jnp.all(jnp.linalg.eigvalsh(cov_upd) > 0)
-
-
 def test_masked_update_is_identity(model):
     mean = jr.normal(jr.key(5), (D,))
     cov = random_psd(jr.key(6), D)

@@ -8,7 +8,6 @@ from jax import Array
 from tqdm import trange
 
 from wasabi.fitting import REFIT_FIELDS, TrialBuffer, refit
-from wasabi.inference.ekf import NUM_ITERS
 from wasabi.inference.joint import BPosterior, filter_trial
 from wasabi.model import StateSpaceModel
 from wasabi.selection import SelectionStrategy, TrialDesign
@@ -25,15 +24,15 @@ def observe_trial(
     keep: Array,
     refit_steps: int = 20,
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
-    filter_iters: int = NUM_ITERS,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, optax.OptState, Array]:
     """Incorporate one trial.
 
-    Runs the joint EKF over [x; vec(B)] with the dynamics fixed, refits A, C, d, Q, b on
-    every trial so far with B fixed at its posterior mean, then re-expresses the B
-    posterior in the refit latent basis.
+    1. Runs the joint EKF over [x; vec(B)] with the dynamics fixed to get the posterior over B.
+    2. Add a trial to the buffer.
+    3. Refits A, C, d, Q, b on every trial in the trial buffer with B fixed at its posterior mean.
+    4. Re-expresses the B posterior in the refit latent basis.
     """
-    _, prior, _ = filter_trial(model, prior, ys, ss, keep, filter_iters)
+    _, prior, _ = filter_trial(model, prior, ys, ss, keep)
     buffer = buffer.add(ys, ss, keep)
     refit_model, opt_state, losses = refit(
         model, opt_state, prior.B, buffer, optimizer, refit_steps, refit_fields
@@ -66,7 +65,6 @@ def run_adaptive(
     key: Array,
     refit_steps: int = 20,
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
-    filter_iters: int = NUM_ITERS,
     evaluate: Callable[[StateSpaceModel, BPosterior], dict] | None = None,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, dict]:
     """Closed-loop identification of B: pick a pattern, observe it, `observe_trial`.
@@ -86,7 +84,7 @@ def run_adaptive(
         ys = jnp.asarray(simulate(candidates[choice]))
         model, prior, buffer, opt_state, losses = observe_trial(
             model, prior, buffer, optimizer, opt_state, ys, ss, design.keep,
-            refit_steps, refit_fields, filter_iters,
+            refit_steps, refit_fields,
         )
 
         _record(history, choice, prior, losses, model, evaluate)
@@ -108,11 +106,10 @@ def run_batch(
     opt_state: optax.OptState,
     refit_steps: int = 20,
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
-    filter_iters: int = NUM_ITERS,
     order: np.ndarray | None = None,
     evaluate: Callable[[StateSpaceModel, BPosterior], dict] | None = None,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, dict]:
-    """Replay recorded trials through `observe_trial`, in `order` (default: as given).
+    """Replay recorded trials through `observe_trial`, in `order` (default: as given). This is used for fitting real data.
 
     keep is (T,) shared or (n_trials, T). The "choice" history holds trial indices.
     """
@@ -124,7 +121,7 @@ def run_batch(
         j = int(order[i])
         model, prior, buffer, opt_state, losses = observe_trial(
             model, prior, buffer, optimizer, opt_state, Ys[j], Ss[j], keep[j],
-            refit_steps, refit_fields, filter_iters,
+            refit_steps, refit_fields,
         )
 
         _record(history, j, prior, losses, model, evaluate)

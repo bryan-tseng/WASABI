@@ -9,7 +9,7 @@ class ObservationModel(eqx.Module):
     """y_t | x_t with mean rate(x_t) and variance noise_var(rate), independent across channels.
 
     The EKF linearizes `rate` and uses diag(noise_var) as the measurement covariance;
-    `log_prob` gives the marginal likelihood and the iterated update's objective.
+    `log_prob` gives the marginal likelihood.
     """
 
     @property

@@ -11,7 +11,7 @@ from wasabi.utils import stim_nonlinearity
 class DynamicsModel(eqx.Module):
     """Latent dynamics with an additive stim term:
 
-        x_t = f(x_{t-1}) + B u(s_t) + eps_t,     eps_t ~ N(0, Q)
+        x_t = f(x_{t-1}) + B u(s_t) + eps_t, eps_t ~ N(0, Q)
         u(s) = stim_nonlinearity(apply_stim_kernel(s), b)
 
     B is not a field: it is either tracked by the joint filter or passed in fixed. It
@@ -35,22 +35,24 @@ class DynamicsModel(eqx.Module):
 
     @abstractmethod
     def propagate(self, x: Array) -> Array:
-        """The autonomous part of the transition, f(x)."""
+        """Propagate one step forward f(x)"""
         raise NotImplementedError
 
     def jacobian(self, x: Array) -> Array:
-        """d f / dx, used by the EKF prediction. Override when it is known in closed form."""
+        """df / dx, used by the EKF prediction, equivalent to A. Override when it is known in closed form."""
         return jax.jacfwd(self.propagate)(x)
 
     @abstractmethod
     def apply_stim_kernel(self, s: Array) -> Array:
-        """Map a stim pattern s (N,) to the drive of each input channel, e.g. V s."""
+        """Map a stim pattern s (N,) to the drive of each input channel, e.g. Vs."""
         raise NotImplementedError
 
     def stim_input(self, s: Array) -> Array:
+        """Apply nonlinearity to stim kernel"""
         return stim_nonlinearity(self.apply_stim_kernel(s), self.b, self.beta_stim)
 
     def transition(self, x: Array, B: Array, s: Array) -> Array:
+        """Stim nonlinearity"""
         return self.propagate(x) + B @ self.stim_input(s)
 
     def project(self) -> Self:

@@ -51,7 +51,7 @@ class PoissonObservations(ObservationModel):
 
     @override
     def noise_var(self, rate: Array) -> Array:
-        # Noise equals mean
+        # Var equals mean
         return rate
 
     @override

@@ -62,7 +62,6 @@ def parse_args():
     parser.add_argument("--prior-var", type=float, default=1.0)
     parser.add_argument("--refit-steps", type=int, default=20)
     parser.add_argument("--freeze-b", action="store_true", help="do not refit b between trials")
-    parser.add_argument("--filter-iters", type=int, default=1, help="> 1 for the iterated EKF in the joint filter")
     parser.add_argument("--strategies", nargs="+", default=["DOptimal", "Tile", "Random"])
     return parser.parse_args()
 
@@ -174,7 +173,6 @@ def main():
                 jr.key(seed),
                 refit_steps=args.refit_steps,
                 refit_fields=refit_fields,
-                filter_iters=args.filter_iters,
                 evaluate=evaluate,
             )
             runs.append(history)

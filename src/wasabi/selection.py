@@ -2,8 +2,9 @@
 
 The covariance recursion does not depend on the observed counts except through the
 linearization point, so the expected end-of-trial covariance of vec(B) is approximated
-by running the filter on its own predictions (zero innovation). Candidates are scored
-by the log det of that covariance (smaller is better).
+by running the filter on its own predictions (zero innovation).
+
+Candidates are scored by the log det of that covariance.
 """
 
 from abc import ABC, abstractmethod
@@ -23,9 +24,9 @@ from wasabi.model import StateSpaceModel
 
 
 class TrialDesign(eqx.Module):
-    """Timing shared by every stim trial: when stim is on and which bins are blanked."""
+    """Note: Timing is shared by every stim trial: when stim is on and which bins are blanked."""
 
-    keep: Array  # (T,) False where the emission is blanked
+    keep: Array  # (T,) False where the observations are blanked, not static because you slice it
     t_stim: int = eqx.field(static=True)
     num_stim_bins: int = eqx.field(static=True)
 
@@ -51,6 +52,7 @@ class TrialDesign(eqx.Module):
 def _rollout(
     model: StateSpaceModel, mean: Array, cov: Array, ss: Array, keep: Array
 ) -> tuple[Array, Array]:
+    """Because the covariance update of B depends on H which is linearized at x_t. It indirectly depends on the observations at x_t. We approximate the expected covariance by rolling the EKF forward with zero innovation, which keeps x at its mode."""
     K = model.state_dim
 
     def step(carry, inputs):
@@ -58,8 +60,8 @@ def _rollout(
         s, k = inputs
         mean, cov = predict(model, mean, cov, s)
         expected_y = model.rate(mean[:K])
-        # zero innovation keeps x at the mode, so one plain EKF step is exact
-        _, mean, cov = ekf_update(model, mean, cov, expected_y, k, num_iters=1)
+        # zero innovation
+        _, mean, cov = ekf_update(model, mean, cov, expected_y, k)
         return (mean, cov), None
 
     (mean, cov), _ = lax.scan(step, (mean, cov), (ss, keep))
@@ -87,6 +89,7 @@ def expected_final_logdets(
 
 
 class SelectionStrategy(ABC):
+    """Base class for selection strategies that includes the model, prior, and trial design (D-optimal etc)."""
     @abstractmethod
     def select(
         self,
