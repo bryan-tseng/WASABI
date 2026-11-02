@@ -9,7 +9,10 @@ Only the x rows of the augmented transition are non-trivial,
 so `predict` only updates the x rows and columns of the covariance; the B block is
 unchanged because B is constant and has no process noise.
 
-The measurement update is `ekf.ekf_update`, shared with the latent-only filter.
+The measurement update is `ekf.ekf_update`, shared with the latent-only filter. With
+`relinearize_iters > 0` the observation is re-linearized around the smoothed latent path and the
+filter is run again (the damped iterated smoother of relinearize.py), so the B posterior is the
+Laplace approximation at the trial's posterior mode instead of the plain EKF one.
 """
 
 from typing import Self
@@ -19,7 +22,8 @@ import jax
 import jax.numpy as jnp
 from jax import Array, lax
 
-from wasabi.inference.ekf import Posterior, ekf_update
+from wasabi.inference.ekf import Posterior, ekf_update, smoothed_path, trajectory_log_density
+from wasabi.inference.relinearize import RELINEARIZE_ITERS, damped_gauss_newton
 from wasabi.model import StateSpaceModel
 from wasabi.utils import symmetrize, unvec, vec
 
@@ -82,14 +86,17 @@ def build_aug_operator(model: StateSpaceModel, x: Array, s: Array) -> Array:
     return jnp.concatenate([A, uTkronI], axis=1)
 
 
-def predict(model: StateSpaceModel, mean: Array, cov: Array, s: Array) -> tuple[Array, Array]:
-    # Predictive mean and covariance
+def predict(
+    model: StateSpaceModel, mean: Array, cov: Array, s: Array, Q: Array | None = None
+) -> tuple[Array, Array]:
+    # Predictive mean and covariance; Q defaults to the model's process noise for s
     K = model.state_dim
+    Q = model.process_noise(s) if Q is None else Q
     A_U = build_aug_operator(model, mean[:K], s)
     x_pred = model.transition(mean[:K], unvec(mean[K:], K), s)
     FP = A_U @ cov  # (K, K + NK)
     cov = cov.at[:K, :].set(FP).at[:, :K].set(FP.T) # Write top K rows and K columns
-    cov = cov.at[:K, :K].set(FP @ A_U.T + model.process_noise(s)) # Include process noise in top left block
+    cov = cov.at[:K, :K].set(FP @ A_U.T + Q) # Include process noise in top left block
     return mean.at[:K].set(x_pred), symmetrize(cov)
 
 
@@ -100,6 +107,76 @@ def transition_matrix(model: StateSpaceModel, x: Array, s: Array) -> Array:
     return jnp.eye(D).at[:K, :].set(build_aug_operator(model, x, s))
 
 
+def _filter(model, prior, ys, ss, keep, Qs, lin_xs, store):
+    """One joint filter pass, the observation linearized at `lin_xs` (None: the predicted
+    means). Returns (loglik, final mean, final cov, per-bin outputs): the filtered latent
+    means, or with `store` the full filtered and predicted states the smoother needs."""
+    K = model.state_dim
+
+    def step(carry, inputs):
+        loglik, mean, cov = carry
+        y, s, k, Q, lin = inputs
+        pred_mean, pred_cov = predict(model, mean, cov, s, Q)
+        ll, mean, cov = ekf_update(model, pred_mean, pred_cov, y, k, lin)
+        out = (mean, cov, pred_mean, pred_cov) if store else mean[:K]
+        return (loglik + ll, mean, cov), out
+
+    (loglik, mean, cov), out = lax.scan(
+        step, (jnp.array(0.0), *initial_state(model, prior)), (ys, ss, keep, Qs, lin_xs)
+    )
+    return loglik, mean, cov, out
+
+
+def _rts(model, ss, filtered_means, filtered_covs, predicted_means, predicted_covs):
+    """Dense RTS backward pass over the augmented state."""
+
+    def backward(carry, t):
+        smoothed_means_next, smoothed_covs_next = carry
+        F = transition_matrix(model, filtered_means[t, : model.state_dim], ss[t + 1])
+        G = jnp.linalg.solve(predicted_covs[t + 1], F @ filtered_covs[t]).T
+        smoothed_means = filtered_means[t] + G @ (smoothed_means_next - predicted_means[t + 1])
+        smoothed_covs = symmetrize(filtered_covs[t] + G @ (smoothed_covs_next - predicted_covs[t + 1]) @ G.T)
+        return (smoothed_means, smoothed_covs), (smoothed_means, smoothed_covs)
+
+    T = ss.shape[0]
+    _, (smoothed_means, smoothed_covs) = lax.scan(
+        backward, (filtered_means[-1], filtered_covs[-1]), jnp.arange(T - 1), reverse=True
+    )
+    return (
+        jnp.concatenate([smoothed_means, filtered_means[-1:]]),
+        jnp.concatenate([smoothed_covs, filtered_covs[-1:]]),
+    )
+
+
+def _linearization(model, prior, ys, ss, keep, Qs, relinearize_iters):
+    """Where to linearize the observation: None for the plain EKF, else the damped
+    Gauss-Newton refinement of the smoothed latent path. B is part of the trajectory the
+    log posterior is evaluated on, with the trial's prior on it. No gradient flows through it.
+
+    Once linearized, the model is linear-Gaussian, so E[x_t | y] = E[x_t | y, B = E[B | y]]:
+    the smoothed latent path is the cheap latent-only smoother at the filtered B mean, with no
+    need for the dense smoother over the augmented state.
+    """
+    if relinearize_iters == 0:
+        return None
+    K = model.state_dim
+    prior_chol = jnp.linalg.cholesky(prior.cov)
+
+    def smooth(trajectory):
+        lin_xs = trajectory[0]
+        _, mean, _, _ = _filter(model, prior, ys, ss, keep, Qs, lin_xs, store=False)
+        b = mean[K:]  # B is constant, so its smoothed mean is the last filtered one
+        return smoothed_path(model, unvec(b, K), ys, ss, keep, Qs, lin_xs), b
+
+    def log_density(trajectory):
+        xs, b = trajectory
+        r = jax.scipy.linalg.solve_triangular(prior_chol, b - prior.mean, lower=True)
+        return trajectory_log_density(model, xs, unvec(b, K), ys, ss, keep, Qs) - 0.5 * r @ r
+
+    trajectory = damped_gauss_newton(smooth, log_density, smooth((None,)), relinearize_iters - 1)
+    return lax.stop_gradient(trajectory[0])
+
+
 @eqx.filter_jit
 def filter_trial(
     model: StateSpaceModel,
@@ -107,25 +184,18 @@ def filter_trial(
     ys: Array,
     ss: Array,
     keep: Array,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[Array, BPosterior, Array]:
     """Run the joint filter over one trial.
 
-    Returns (loglik, the posterior over B at the end of the trial, filtered latent means).
-    The B block of the final filtered state is also the smoothed one, so it is the
-    next trial's prior.
+    Returns (loglik, the posterior over B at the end of the trial, filtered latent means),
+    from the final pass. The B block of the final filtered state is also the smoothed one,
+    so it is the next trial's prior.
     """
     K = model.state_dim
-
-    def step(carry, inputs):
-        loglik, mean, cov = carry
-        y, s, k = inputs
-        mean, cov = predict(model, mean, cov, s)
-        ll, mean, cov = ekf_update(model, mean, cov, y, k)
-        return (loglik + ll, mean, cov), mean[:K]
-
-    (loglik, mean, cov), filtered_means = lax.scan(
-        step, (jnp.array(0.0), *initial_state(model, prior)), (ys, ss, keep)
-    )
+    Qs = jax.vmap(model.process_noise)(ss)
+    lin_xs = _linearization(model, prior, ys, ss, keep, Qs, relinearize_iters)
+    loglik, mean, cov, filtered_means = _filter(model, prior, ys, ss, keep, Qs, lin_xs, store=False)
     Bposterior = eqx.tree_at(
         lambda p: (p.mean, p.cov), prior, (mean[K:], symmetrize(cov[K:, K:]))
     )
@@ -139,6 +209,7 @@ def filter_trials(
     Ys: Array,
     Ss: Array,
     keep: Array,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[Array, BPosterior]:
     """`filter_trial` over trials in order, carrying the B posterior from one to the next.
 
@@ -150,7 +221,7 @@ def filter_trials(
 
     def step(carry, inputs):
         loglik, prior = carry
-        ll, prior, _ = filter_trial(model, prior, *inputs)
+        ll, prior, _ = filter_trial(model, prior, *inputs, relinearize_iters=relinearize_iters)
         return (loglik + ll, prior), None
 
     (loglik, Bposterior), _ = lax.scan(step, (jnp.array(0.0), prior), (Ys, Ss, keep))
@@ -159,39 +230,20 @@ def filter_trials(
 
 @eqx.filter_jit
 def smooth_trial(
-    model: StateSpaceModel, prior: BPosterior, ys: Array, ss: Array, keep: Array
+    model: StateSpaceModel,
+    prior: BPosterior,
+    ys: Array,
+    ss: Array,
+    keep: Array,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> Posterior:
     """Joint filter plus RTS backward pass over the augmented state.
 
     Stores (T, NK, NK) covariances, so use it for inspecting one trial, not inside the loop.
     """
-
-    def step(carry, inputs):
-        loglik, mean, cov = carry
-        y, s, k = inputs
-        pm, pP = predict(model, mean, cov, s)
-        ll, mean, cov = ekf_update(model, pm, pP, y, k)
-        return (loglik + ll, mean, cov), (mean, cov, pm, pP)
-
-    (loglik, _, _), (filtered_means, filtered_covs, predicted_means, predicted_covs) = lax.scan(
-        step, (jnp.array(0.0), *initial_state(model, prior)), (ys, ss, keep)
-    )
-
-    def backward(carry, t):
-        smoothed_means_next, smoothed_covs_next = carry
-        F = transition_matrix(model, filtered_means[t, : model.state_dim], ss[t + 1])
-        G = jnp.linalg.solve(predicted_covs[t + 1], F @ filtered_covs[t]).T
-        smoothed_means = filtered_means[t] + G @ (smoothed_means_next - predicted_means[t + 1])
-        smoothed_covs = symmetrize(filtered_covs[t] + G @ (smoothed_covs_next - predicted_covs[t + 1]) @ G.T)
-        return (smoothed_means, smoothed_covs), (smoothed_means, smoothed_covs)
-
-    T = ys.shape[0]
-    _, (smoothed_means, smoothed_covs) = lax.scan(backward, (filtered_means[-1], filtered_covs[-1]), jnp.arange(T - 1), reverse=True)
-
-    return Posterior(
-        loglik,
-        filtered_means,
-        filtered_covs,
-        jnp.concatenate([smoothed_means, filtered_means[-1:]]),
-        jnp.concatenate([smoothed_covs, filtered_covs[-1:]]),
-    )
+    Qs = jax.vmap(model.process_noise)(ss)
+    lin_xs = _linearization(model, prior, ys, ss, keep, Qs, relinearize_iters)
+    loglik, _, _, states = _filter(model, prior, ys, ss, keep, Qs, lin_xs, store=True)
+    smoothed_means, smoothed_covs = _rts(model, ss, *states)
+    filtered_means, filtered_covs, _, _ = states
+    return Posterior(loglik, filtered_means, filtered_covs, smoothed_means, smoothed_covs)

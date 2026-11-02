@@ -9,6 +9,7 @@ from tqdm import trange
 
 from wasabi.fitting import REFIT_FIELDS, TrialBuffer, refit
 from wasabi.inference.joint import BPosterior, filter_trial
+from wasabi.inference.relinearize import RELINEARIZE_ITERS
 from wasabi.model import StateSpaceModel
 from wasabi.selection import SelectionStrategy, TrialDesign
 
@@ -24,6 +25,7 @@ def observe_trial(
     keep: Array,
     refit_steps: int = 20,
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, optax.OptState, Array]:
     """Incorporate one trial.
 
@@ -33,10 +35,11 @@ def observe_trial(
        at its posterior mean; its posterior covariance is counted as extra noise in stim bins.
     4. Re-expresses the B posterior in the refit latent basis.
     """
-    _, prior, _ = filter_trial(model, prior, ys, ss, keep)
+    _, prior, _ = filter_trial(model, prior, ys, ss, keep, relinearize_iters)
     buffer = buffer.add(ys, ss, keep)
     refit_model, opt_state, losses = refit(
-        model, opt_state, prior.B, buffer, optimizer, refit_steps, refit_fields, prior.cov
+        model, opt_state, prior.B, buffer, optimizer, refit_steps, refit_fields, prior.cov,
+        relinearize_iters,
     )
     prior = prior.realign(refit_model.basis_change(model))
 
@@ -67,6 +70,7 @@ def run_adaptive(
     refit_steps: int = 20,
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
     evaluate: Callable[[StateSpaceModel, BPosterior], dict] | None = None,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, dict]:
     """Closed-loop identification of B: pick a pattern, observe it, `observe_trial`.
 
@@ -85,7 +89,7 @@ def run_adaptive(
         ys = jnp.asarray(simulate(candidates[choice]))
         model, prior, buffer, opt_state, losses = observe_trial(
             model, prior, buffer, optimizer, opt_state, ys, ss, design.keep,
-            refit_steps, refit_fields,
+            refit_steps, refit_fields, relinearize_iters,
         )
 
         _record(history, choice, prior, losses, model, evaluate)
@@ -109,6 +113,7 @@ def run_batch(
     refit_fields: tuple[str, ...] = REFIT_FIELDS,
     order: np.ndarray | None = None,
     evaluate: Callable[[StateSpaceModel, BPosterior], dict] | None = None,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, BPosterior, TrialBuffer, dict]:
     """Replay recorded trials through `observe_trial`, in `order` (default: as given). This is used for fitting real data.
 
@@ -122,7 +127,7 @@ def run_batch(
         j = int(order[i])
         model, prior, buffer, opt_state, losses = observe_trial(
             model, prior, buffer, optimizer, opt_state, Ys[j], Ss[j], keep[j],
-            refit_steps, refit_fields,
+            refit_steps, refit_fields, relinearize_iters,
         )
 
         _record(history, j, prior, losses, model, evaluate)

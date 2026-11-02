@@ -6,3 +6,4 @@ from wasabi.inference.ekf import (
     smooth_latents,
 )
 from wasabi.inference.joint import BPosterior, filter_trial, filter_trials, smooth_trial
+from wasabi.inference.relinearize import RELINEARIZE_ITERS

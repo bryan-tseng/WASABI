@@ -5,7 +5,7 @@ import jax.random as jr
 import numpy as np
 import pytest
 
-from wasabi.inference.ekf import ekf_update
+from wasabi.inference.ekf import ekf_update, stim_effect_cov
 from wasabi.inference.joint import BPosterior, predict, transition_matrix
 from wasabi.dynamics_models import LinearDynamics
 from wasabi.model import StateSpaceModel, make_poisson_lds
@@ -25,6 +25,7 @@ def model():
         Q_chol=jnp.tril(jr.normal(keys[2], (K, K))) + jnp.eye(K),
         V=jnp.eye(N),
         b=jnp.array(-0.3),
+        log_stim_var=jnp.log(0.5 + jnp.arange(N) / N),
         mu0=model.mu0,
         Sigma0=model.Sigma0,
     )
@@ -59,6 +60,16 @@ def test_update_matches_dense_ekf(model):
     np.testing.assert_allclose(cov_upd, (jnp.eye(D) - gain @ H) @ cov, atol=1e-10)
 
 
+def test_linearizing_at_prediction_matches_plain_update(model):
+    mean = jr.normal(jr.key(11), (D,))
+    cov = random_psd(jr.key(12), D)
+    y = jnp.arange(N, dtype=float)
+    plain = ekf_update(model, mean, cov, y, jnp.array(True))
+    at_prediction = ekf_update(model, mean, cov, y, jnp.array(True), lin_x=mean[:K])
+    for a, b in zip(plain, at_prediction):
+        np.testing.assert_allclose(a, b, rtol=1e-12)
+
+
 def test_masked_update_is_identity(model):
     mean = jr.normal(jr.key(5), (D,))
     cov = random_psd(jr.key(6), D)
@@ -83,10 +94,20 @@ def test_structured_predict_matches_jacobian(model):
         return jnp.concatenate([model.transition(x, B, s), z[K:]])
 
     F = jax.jacfwd(augmented_transition)(mean)
-    Q = jnp.zeros((D, D)).at[:K, :K].set(model.Q)
+    # stim adds sum_n u_n^2 stim_var[n] to every latent's process noise
+    u = model.stim_input(s)
+    Q_s = model.Q + jnp.sum(u**2 * model.dynamics.stim_var) * jnp.eye(K)
+    Q = jnp.zeros((D, D)).at[:K, :K].set(Q_s)
     np.testing.assert_allclose(pred_mean, augmented_transition(mean), rtol=1e-10)
     np.testing.assert_allclose(pred_cov, F @ cov @ F.T + Q, atol=1e-10)
     np.testing.assert_allclose(transition_matrix(model, mean[:K], s), F, atol=1e-12)
+
+
+def test_stim_effect_cov_matches_kron():
+    u = jr.normal(jr.key(9), (N,))
+    B_cov = random_psd(jr.key(10), K * N)
+    G = jnp.kron(u[None, :], jnp.eye(K))  # B u = (uᵀ ⊗ I) vec(B)
+    np.testing.assert_allclose(stim_effect_cov(B_cov, u), G @ B_cov @ G.T, rtol=1e-10)
 
 
 def test_realign_matches_kron():

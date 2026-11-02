@@ -15,6 +15,7 @@ Folder structure:
 │       ├── model.py           # StateSpaceModel(dynamics, observation), make_poisson_lds
 │       ├── inference/ekf.py   # blanking-aware EKF; latent filter/smoother
 │       ├── inference/joint.py # joint EKF over [x; vec(B)], BPosterior
+│       ├── inference/relinearize.py # damped iterated smoother (re-linearization)
 │       ├── fitting.py         # refit / fit_initial / fit_batch (EM), TrialBuffer
 │       ├── selection.py       # expected end-of-trial log det, DOptimal / Tile / Random
 │       └── experiment.py      # observe_trial, run_adaptive, run_batch
@@ -75,6 +76,12 @@ Model (see `docs/problem_formulation/joint_ekf.tex`):
    covariance forward. `DOptimal` picks the smallest; `Tile` and `Random` are baselines.
 4. **Recorded data** (`fit_batch`): EM over a fixed set of trials, alternating a joint EKF
    pass over every trial with a refit of A, C, d, Q, b.
+
+The filters can optionally re-linearize the Poisson observation around the smoothed trajectory
+and run again (a damped iterated extended Kalman smoother, `inference/relinearize.py`), so the
+posterior is the Laplace approximation at the trial's posterior mode. `relinearize_iters`
+(`--relinearize-iters` in the script) sets the number of passes; the default 0 is the plain EKF,
+which fit better in our tests.
 
 Run the tests with `uv run pytest`, and the closed-loop simulation with
 `uv run python scripts/joint_ekf_simulation.py`.

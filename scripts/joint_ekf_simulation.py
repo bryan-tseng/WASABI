@@ -43,6 +43,7 @@ from wasabi import (
     tile_strategy,
 )
 from wasabi.fitting import REFIT_FIELDS
+from wasabi.inference import RELINEARIZE_ITERS
 from wasabi.utils import (
     contiguous_blocks,
     make_tiling_schedule,
@@ -83,6 +84,10 @@ def parse_args():
     )
     parser.add_argument("--strategies", nargs="+", default=["DOptimal", "Tile", "Random"])
     parser.add_argument("--tag", default="", help="suffix for the results and figure file names")
+    parser.add_argument(
+        "--relinearize-iters", type=int, default=RELINEARIZE_ITERS,
+        help="iterated-smoother passes per trial (0, the default: plain EKF)",
+    )
     return parser.parse_args()
 
 
@@ -202,7 +207,9 @@ def run_ground_truth(gt, args, strategies_for):
         beta_stim=beta_stim,
         beta_emit=beta_emit,
     )
-    model, losses = fit_initial(model, buffer, num_steps=1000)
+    model, losses = fit_initial(
+        model, buffer, num_steps=1000, relinearize_iters=args.relinearize_iters
+    )
     angles = np.degrees(subspace_angles(np.asarray(model.observation.C), params["C"]))
     print(
         f"[gt {gt}] initial fit NLL per bin {losses[0]:.4f} -> {losses[-1]:.4f}, "
@@ -236,6 +243,7 @@ def run_ground_truth(gt, args, strategies_for):
                 refit_steps=args.refit_steps,
                 refit_fields=refit_fields,
                 evaluate=evaluate,
+                relinearize_iters=args.relinearize_iters,
             )
             runs.append(history)
             print(

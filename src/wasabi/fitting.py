@@ -7,7 +7,7 @@ For example: (orthonormal C, clipped A)
 Fields in the model are dotted paths, e.g. "dynamics.A, observation.C"
 """
 
-from functools import reduce
+from functools import partial, reduce
 
 from typing import Self
 
@@ -19,6 +19,7 @@ from jax import Array
 
 from wasabi.inference.ekf import filter_latents
 from wasabi.inference.joint import BPosterior, filter_trials
+from wasabi.inference.relinearize import RELINEARIZE_ITERS
 from wasabi.model import StateSpaceModel
 
 REFIT_FIELDS = (
@@ -98,6 +99,7 @@ def negative_loglik(
     B: Array,
     buffer: TrialBuffer,
     B_cov: Array | None = None,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> Array:
     """
     Masked EKF marginal negative log likelihood per kept bin. This is our loss.
@@ -106,8 +108,10 @@ def negative_loglik(
     Hence the negll is averaged over trials
     B_cov, the posterior covariance of vec(B), is added to the noise of stim bins so that
     B's own uncertainty is not mistaken for trial-to-trial stim variability.
+    relinearize_iters: see `filter_latents`; gradients flow through the final pass only.
     """
-    loglik, *_ = jax.vmap(filter_latents, in_axes=(None, None, 0, 0, 0, None))(
+    filter_one = partial(filter_latents, relinearize_iters=relinearize_iters)
+    loglik, *_ = jax.vmap(filter_one, in_axes=(None, None, 0, 0, 0, None))(
         model, B, buffer.ys, buffer.ss, buffer.keep, B_cov
     )
     num_bins = jnp.maximum((buffer.keep & buffer.valid[:, None]).sum(), 1)
@@ -115,8 +119,10 @@ def negative_loglik(
 
 
 @eqx.filter_jit
-def _loss(diff_model, static_model, B, buffer, B_cov):
-    return negative_loglik(eqx.combine(diff_model, static_model), B, buffer, B_cov)
+def _loss(diff_model, static_model, B, buffer, B_cov, relinearize_iters):
+    return negative_loglik(
+        eqx.combine(diff_model, static_model), B, buffer, B_cov, relinearize_iters
+    )
 
 
 @eqx.filter_jit
@@ -128,11 +134,12 @@ def _step(
     optimizer: optax.GradientTransformation,
     fields: tuple[str, ...],
     B_cov: Array | None,
+    relinearize_iters: int,
 ):
     diff_model, static_model = eqx.partition(model, trainable_spec(model, fields))
     # Split into trainable vs static for jit
     loss, grads = eqx.filter_value_and_grad(_loss)(
-        diff_model, static_model, B, buffer, B_cov
+        diff_model, static_model, B, buffer, B_cov, relinearize_iters
     )
     updates, opt_state = optimizer.update(grads, opt_state, diff_model)
     model = eqx.apply_updates(model, updates).project()
@@ -157,12 +164,15 @@ def refit(
     num_steps: int,
     fields: tuple[str, ...] = REFIT_FIELDS,
     B_cov: Array | None = None,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, optax.OptState, Array]:
     """Warm-started refit of `fields` on all trials in `buffer`, with B fixed (see
-    `negative_loglik` for `B_cov`)."""
+    `negative_loglik` for `B_cov` and `relinearize_iters`)."""
     losses = []
     for _ in range(num_steps):
-        model, opt_state, loss = _step(model, opt_state, B, buffer, optimizer, fields, B_cov)
+        model, opt_state, loss = _step(
+            model, opt_state, B, buffer, optimizer, fields, B_cov, relinearize_iters
+        )
         losses.append(loss)
 
     return model, opt_state, jnp.array(losses)
@@ -173,11 +183,14 @@ def fit_initial(
     buffer: TrialBuffer,
     num_steps: int = 500,
     learning_rate: float = 5e-3,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, Array]:
     """Fit on control trials before any stim. Stim input is zero there, so B drops out."""
     optimizer, opt_state = init_optimizer(model, learning_rate)
     B = jnp.zeros((model.state_dim, model.num_channels))
-    model, _, losses = refit(model, opt_state, B, buffer, optimizer, num_steps)
+    model, _, losses = refit(
+        model, opt_state, B, buffer, optimizer, num_steps, relinearize_iters=relinearize_iters
+    )
 
     return model, losses
 
@@ -190,6 +203,7 @@ def fit_batch(
     refit_steps: int = 50,
     learning_rate: float = 5e-3,
     fields: tuple[str, ...] = REFIT_FIELDS,
+    relinearize_iters: int = RELINEARIZE_ITERS,
 ) -> tuple[StateSpaceModel, BPosterior, Array]:
     """EM over a fixed set of recorded trials.
 
@@ -209,11 +223,12 @@ def fit_batch(
 
     losses = []
     for _ in range(num_iters):
-        _, posterior = filter_trials(model, prior, Ys, Ss, keep)
+        _, posterior = filter_trials(model, prior, Ys, Ss, keep, relinearize_iters)
         model, opt_state, iter_losses = refit(
-            model, opt_state, posterior.B, buffer, optimizer, refit_steps, fields, posterior.cov
+            model, opt_state, posterior.B, buffer, optimizer, refit_steps, fields, posterior.cov,
+            relinearize_iters,
         )
         losses.append(iter_losses)
 
-    _, posterior = filter_trials(model, prior, Ys, Ss, keep)
+    _, posterior = filter_trials(model, prior, Ys, Ss, keep, relinearize_iters)
     return model, posterior, jnp.stack(losses)
