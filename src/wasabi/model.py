@@ -23,7 +23,18 @@ class StateSpaceModel(eqx.Module):
 
     @property
     def num_channels(self) -> int:
+        """Recorded channels."""
         return self.observation.num_channels
+
+    @property
+    def num_inputs(self) -> int:
+        """Input channels u(s), i.e. columns of B."""
+        return self.dynamics.num_inputs
+
+    @property
+    def num_stim_channels(self) -> int:
+        """Length of a stim pattern. Can be fewer than the recorded channels."""
+        return self.dynamics.num_stim_channels
 
     @property
     def Q(self) -> Array:
@@ -73,11 +84,17 @@ def make_poisson_lds(
     mean_rate: Array | None = None,
     beta_stim: float = 5.0,
     beta_emit: float = 1.0,
+    num_channels: int | None = None,
 ) -> StateSpaceModel:
-    """Linear dynamics with a softplus stim input, Poisson softplus observations."""
+    """Linear dynamics with a softplus stim input, Poisson softplus observations.
+
+    `num_channels` is the number of recorded channels; by default V.shape[0], i.e. every
+    stimulated channel is also recorded and nothing else is.
+    """
     return StateSpaceModel(
         LinearDynamics.initialize(state_dim, V, beta_stim=beta_stim),
         PoissonObservations.initialize(
-            V.shape[0], state_dim, key, mean_rate, beta_emit=beta_emit
+            V.shape[0] if num_channels is None else num_channels, state_dim, key, mean_rate,
+            beta_emit=beta_emit,
         ),
     )

@@ -103,7 +103,7 @@ def predict(
 def transition_matrix(model: StateSpaceModel, x: Array, s: Array) -> Array:
     """Dense F~ linearized at x, only used by the smoother."""
     K = model.state_dim
-    D = K + model.state_dim * model.num_channels
+    D = K + model.state_dim * model.num_inputs
     return jnp.eye(D).at[:K, :].set(build_aug_operator(model, x, s))
 
 

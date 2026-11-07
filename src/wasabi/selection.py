@@ -75,7 +75,7 @@ def expected_final_logdets(
     """Expected log det of the end-of-trial B covariance for each candidate pattern."""
     K = model.state_dim
     t = design.t_stim
-    zeros = jnp.zeros((t, model.num_channels))
+    zeros = jnp.zeros((t, model.num_stim_channels))
 
     # Before stim onset every candidate sees the same (empty) input, so roll that once.
     mean, cov = _rollout(model, *initial_state(model, prior), zeros, design.keep[:t])

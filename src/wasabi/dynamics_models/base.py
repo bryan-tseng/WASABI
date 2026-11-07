@@ -30,6 +30,18 @@ class DynamicsModel(eqx.Module):
 
     @property
     @abstractmethod
+    def num_inputs(self) -> int:
+        """Number of input channels u(s), i.e. columns of B."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def num_stim_channels(self) -> int:
+        """Length of a stim pattern s. Can differ from the number of recorded channels."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
     def Q(self) -> Array:
         raise NotImplementedError
 

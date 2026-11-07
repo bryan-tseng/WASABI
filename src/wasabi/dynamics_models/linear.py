@@ -52,6 +52,16 @@ class LinearDynamics(DynamicsModel):
 
     @property
     @override
+    def num_inputs(self) -> int:
+        return self.V.shape[0]
+
+    @property
+    @override
+    def num_stim_channels(self) -> int:
+        return self.V.shape[1]
+
+    @property
+    @override
     def Q(self) -> Array:
         L = jnp.tril(self.Q_chol)
         return L @ L.T + 1e-6 * jnp.eye(self.state_dim)

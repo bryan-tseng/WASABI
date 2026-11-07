@@ -1,0 +1,55 @@
+# Online WASABI experiment (experiment/src/wasabi_online.py).
+# --source, --strategy and --history on the command
+# line override the values here.
+
+paths:
+  # Relative to this machine's data_root_prefix, for online
+  data_root: "Current Project Databases - NHP/2025 Cerebellum prosthesis/"
+  # Relative to data_root, or absolute, for online data collection
+  recording_dir: "WASABI_test_data/test_data1_261103_114440"
+  control_file: null    # (n_trials, T, recording.num_channels) .npy, e.g. from intan_binning.py --ir
+  # Output files go in <results_dir>/online, offline or simulation, by session.source
+  results_dir: "results"             # relative to the WASABI repo, or absolute
+  output: "next_stim.json"           # next stim, rewritten after every trial
+  history: null                      # null: history_<strategy>_<date>_<time>.npz, e.g. history_tiled_...
+
+session:
+  source: online         # sim | offline | online
+  strategy: DOptimal     # DOptimal | Tile | Random | Sequential (offline: recording order)
+  max_trials: 500
+  seed: 0
+  num_control: 20       # simulated control trials (for sim only)
+  wait_for_key: True     # false: start the next trial as soon as the stim is decided (sim, offline)
+
+stim:
+  num_channels: 80       # channels available to stimulate (offline: set by the recorded stims)
+  group_size: 4          # contiguous channels switched on together
+  max_groups: 2          # candidates: every set of 1..max_groups groups
+  channel_base: 1        # number of the first channel in the printed / JSON output
+  stim_ms: 80.0          # stim duration, starting at the IR crossing
+  blank_after_ms: 20.0    # extra blanking after stim ends (stim itself is always blanked)
+
+recording:
+  num_channels: 128      # recorded channels the dynamics are fit on
+
+offline:
+  # Recorded stim session replayed by source: offline, from its RCP_analysis checkpoints
+  session_dir: "Nike/20251203_NRR_RW011"            # relative to data_root, or absolute
+  intan_files: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]   # stim conditions; their stims are the candidates
+  control_files: [1, 3]                              # no-stim reaching blocks, for the control fit
+
+trial:
+  bin_ms: 20.0                  # as NPRW_rate_est.bin_ms in RCP_analysis
+  window_ms: [-800.0, 600.0]    # trial window around the IR crossing
+  ir_channel: DIGITAL-IN-01     # "USB board digital input channel" 1; or ANALOG-IN-x
+  ir_edge: falling              # DIGITAL-IN-01 is high until the beam is crossed
+  ir_threshold: 1.0             # volts, analog IR only
+  keep_artifacts: false         # keep spikes Spike Scope flags as artifacts (spike ID 128)
+
+model:
+  latents: 4
+  prior_var: 1.0               # prior variance of B
+  refit_steps: 20              # optimizer steps per trial
+  initial_fit_tol: 1.0e-4      # control fit stops when the loss improves less than this (relative) over 100 steps
+  initial_fit_max_steps: 5000  # hard limit on control fit steps
+  freeze_b: false               # keep the stim-input offset b fixed after the control fit (refitting it rescales u(s) under the B posterior)

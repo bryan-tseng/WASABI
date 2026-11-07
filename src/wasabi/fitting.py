@@ -39,17 +39,20 @@ class TrialBuffer(eqx.Module):
     """
 
     ys: Array  # (capacity, T, N) spike counts, NaN where blanked
-    ss: Array  # (capacity, T, N) stim patterns
+    ss: Array  # (capacity, T, S) stim patterns, S stim channels (S = N unless given)
     keep: Array  # (capacity, T) mask which binds are kept
     valid: Array  # (capacity,) True as trials are added, False for empty slots
     size: Array
 
     @classmethod
-    def empty(cls, capacity: int, num_timesteps: int, num_channels: int) -> Self:
+    def empty(
+        cls, capacity: int, num_timesteps: int, num_channels: int, num_stim_channels: int | None = None
+    ) -> Self:
         # Initialize with zeros before filling trials
+        num_stim_channels = num_channels if num_stim_channels is None else num_stim_channels
         return cls(
             ys=jnp.zeros((capacity, num_timesteps, num_channels)),
-            ss=jnp.zeros((capacity, num_timesteps, num_channels)),
+            ss=jnp.zeros((capacity, num_timesteps, num_stim_channels)),
             keep=jnp.zeros((capacity, num_timesteps), dtype=bool),
             valid=jnp.zeros(capacity, dtype=bool),
             size=jnp.array(0),
@@ -187,7 +190,7 @@ def fit_initial(
 ) -> tuple[StateSpaceModel, Array]:
     """Fit on control trials before any stim. Stim input is zero there, so B drops out."""
     optimizer, opt_state = init_optimizer(model, learning_rate)
-    B = jnp.zeros((model.state_dim, model.num_channels))
+    B = jnp.zeros((model.state_dim, model.num_inputs))
     model, _, losses = refit(
         model, opt_state, B, buffer, optimizer, num_steps, relinearize_iters=relinearize_iters
     )
