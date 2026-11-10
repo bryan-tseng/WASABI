@@ -1714,6 +1714,7 @@ dependencies = [
     { name = "numpy" },
     { name = "optax" },
     { name = "pyyaml" },
+    { name = "scipy" },
     { name = "tqdm" },
 ]
 
@@ -1742,6 +1743,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "optax", specifier = ">=0.2.8" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "scipy", specifier = ">=1.18.0" },
     { name = "tqdm" },
 ]
 provides-extras = ["cuda"]

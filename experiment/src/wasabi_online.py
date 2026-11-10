@@ -23,7 +23,7 @@ Keys: any key = trial done, q = quit. Ctrl-C stops a run that does not wait for 
     uv run python experiment/src/wasabi_online.py --source offline
 
     # real data straight from the Intan recording in progress, trials aligned at IR crossings
-    uv run python experiment/src/wasabi_online.py --source online --recording-dir R --control-file C.npy
+    uv run python experiment/src/wasabi_online.py --source online --wasabi-data-dir R --control-data-dir C
 
     # another config file
     uv run python experiment/src/wasabi_online.py --config my_session.yaml
@@ -225,6 +225,16 @@ class OfflineSource:
 
 
 def load_control_trials(path: Path, num_channels: int) -> np.ndarray:
+    """(n_trials, T, N) control trials from a .npy, or from the control_trials.npy in a recording folder."""
+    from intan_binning import TRIALS_FILE
+
+    if path.is_dir():
+        if not (path / TRIALS_FILE).exists():
+            raise FileNotFoundError(
+                f"no {TRIALS_FILE} in {path}; make it with\n"
+                f'    uv run python experiment/src/control_fitting.py "{path}"'
+            )
+        path = path / TRIALS_FILE
     Y = np.load(path).astype(float)
     if Y.ndim != 3 or Y.shape[2] != num_channels:
         raise ValueError(f"control trials must be (n_trials, T, {num_channels}), got {Y.shape}")
@@ -234,36 +244,44 @@ def load_control_trials(path: Path, num_channels: int) -> np.ndarray:
 class IntanSource:
     """Reads trials from the Intan RHX recording in progress, cut at IR crossings.
 
-    On each key press the recording is re-read and the next complete trial not yet used
-    is taken (see `intan_binning.load_trials` for how trials are cut).
+    Spikes are detected from amplifier.dat in a background thread as it is written (see
+    `intan_binning.IntanStream`), so on each key press only the last few samples remain to
+    be processed before the next complete trial not yet used is taken.
     """
 
-    def __init__(self, recording_dir: Path, control_file: Path, num_channels: int, **trial_kwargs):
-        self.recording_dir = Path(recording_dir)
+    def __init__(self, recording_dir: Path, control_file: Path, num_channels: int, **stream_kwargs):
+        from intan_binning import IntanStream
+
         self.control_file = Path(control_file)
         self.num_channels = num_channels
-        self.trial_kwargs = trial_kwargs
+        self.stream = IntanStream(recording_dir, **stream_kwargs)
+        if len(self.stream.channels) != num_channels:
+            raise ValueError(
+                f"{recording_dir} has {len(self.stream.channels)} amplifier channels, "
+                f"recording.num_channels is {num_channels}"
+            )
+        self.stream.start()
         self.num_used = 0
 
     def control_trials(self) -> np.ndarray:
         return load_control_trials(self.control_file, self.num_channels)
 
     def next_trial(self, pattern: np.ndarray) -> np.ndarray | None:
-        from intan_binning import load_trials
-
-        counts, onsets, _ = load_trials(self.recording_dir, **self.trial_kwargs)
-        # Load processed trial spike counts (num_bin x channel)
-        if len(counts) <= self.num_used:
+        self.stream.check()
+        self.stream.update()  # catch up on the samples written since the thread last looked
+        onsets = self.stream.onsets()
+        if len(onsets) <= self.num_used:
             return None
-        if len(counts) > self.num_used + 1:
+        onset = onsets[self.num_used]
+        if len(onsets) > self.num_used + 1:
             print(
-                f"  warning: {len(counts) - self.num_used} new IR trials since the last key "
-                f"press; using the earliest, at {onsets[self.num_used]:.3f} s"
+                f"  warning: {len(onsets) - self.num_used} new IR trials since the last key "
+                f"press; using the earliest, at {self.stream.onset_time(onset):.3f} s"
             )
         else:
-            print(f"  IR trial at {onsets[self.num_used]:.3f} s")
+            print(f"  IR trial at {self.stream.onset_time(onset):.3f} s")
         self.num_used += 1
-        return counts[self.num_used - 1]
+        return self.stream.trial(onset)  # (T, N) spike counts
 
 
 # Control fit
@@ -582,8 +600,11 @@ def parse_args():
     # Per-session overrides of the config
     parser.add_argument("--source", choices=["sim", "offline", "online"])
     parser.add_argument("--strategy", choices=["DOptimal", "Tile", "Random", "Sequential"])
-    parser.add_argument("--recording-dir", type=Path, help="Intan RHX recording folder (online)")
-    parser.add_argument("--control-file", type=Path, help="(n_trials, T, N) .npy of control trials")
+    parser.add_argument("--wasabi-data-dir", type=Path, help="Intan RHX recording folder of the session (online)")
+    parser.add_argument(
+        "--control-data-dir", type=Path,
+        help="control trials: a recording folder with control_trials.npy (control_fitting.py), or an (n_trials, T, N) .npy",
+    )
     parser.add_argument("--history", type=Path)
     return parser.parse_args()
 
@@ -616,16 +637,16 @@ def make_source(cfg: OnlineConfig, design: TrialDesign, recorded=None) -> TrialS
     Raises SystemExit if a path the source needs is missing or the source is unknown.
     """
     source, n = cfg.session.source, cfg.recording.num_channels
-    control_file = cfg.data_path(cfg.paths.control_file)
+    control_file = cfg.data_path(cfg.paths.control_data_dir)
     if source == "sim":
         return SimulatedSource(design, n, cfg.session.num_control, cfg.model.latents, cfg.session.seed)
     if source == "offline":
         return OfflineSource(recorded, round_up(recorded.num_stim_channels, cfg.stim.group_size))
     if source == "online":
-        if cfg.paths.recording_dir is None or control_file is None:
-            raise SystemExit("source online needs recording_dir and control_file")
+        if cfg.paths.wasabi_data_dir is None or control_file is None:
+            raise SystemExit("source online needs paths.wasabi_data_dir and paths.control_data_dir")
         return IntanSource(
-            cfg.data_path(cfg.paths.recording_dir), control_file, n, **cfg.trial.load_trials_kwargs()
+            cfg.data_path(cfg.paths.wasabi_data_dir), control_file, n, **cfg.intan_stream_kwargs()
         )
     raise SystemExit(f"unknown source {source!r}: sim, offline or online")
 
@@ -642,7 +663,7 @@ def main():
         cfg.session.source = args.source
     if args.strategy is not None:
         cfg.session.strategy = args.strategy
-    for name in ("recording_dir", "control_file", "history"):
+    for name in ("wasabi_data_dir", "control_data_dir", "history"):
         value = getattr(args, name)
         if value is not None:
             setattr(cfg.paths, name, str(value.resolve()))

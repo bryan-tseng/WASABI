@@ -1,7 +1,7 @@
 """Load the online experiment config, experiment/config/online.yaml by default.
 
-Data paths (recording_dir, control_file, offline.session_dir) are relative to `paths.data_root`,
-which is prefixed with this machine's data mount from machines.yaml, as in RCP_analysis.
+Data paths (wasabi_data_dir, control_data_dir, offline.session_dir) are relative to this
+machine's data_root_prefix in machines.yaml, plus `paths.data_root` if set, as in RCP_analysis.
 Output files (output, history) go in the results folder of the session's source,
 <results_dir>/online, offline or simulation, with results_dir relative to the WASABI repo.
 Absolute paths are used as given. Unknown keys raise, so a typo in the YAML does not silently fall back to a default.
@@ -25,8 +25,8 @@ RESULTS_FOLDERS = {"online": "online", "offline": "offline", "sim": "simulation"
 @dataclass
 class PathsConfig:
     data_root: str = ""
-    recording_dir: str | None = None
-    control_file: str | None = None
+    wasabi_data_dir: str | None = None  # the RHX recording of the session
+    control_data_dir: str | None = None  # control trials: a recording folder with control_trials.npy, or a .npy
     results_dir: str = "results"
     output: str = "next_stim.json"
     history: str | None = None
@@ -55,6 +55,28 @@ class StimConfig:
 @dataclass
 class RecordingConfig:
     num_channels: int = 128
+    sample_rate: float = 30000.0
+
+
+@dataclass
+class SpikeConfig:
+    """Spike detection on amplifier.dat (see `intan_binning.SpikeDetector`)."""
+
+    band_hz: tuple[float, float] = (300.0, 6000.0)
+    filter_order: int = 3
+    reference: str = "median"
+    threshold: float = 4.5
+    refractory_ms: float = 1.0
+    noise_s: float = 10.0
+    local_radius: tuple[float, float] | None = None  # (inner, outer) um; None: global reference
+    positions_file: str | None = None  # Kilosort chanMap .mat or CSV channel,x,y; relative to experiment/config
+    template_file: str | None = None  # 1-D spike waveform .npy for the matched filter; None: threshold the signal
+
+    def config_path(self, path: str | None) -> Path | None:
+        """`path` under experiment/config, unless it is absolute."""
+        if path is None:
+            return None
+        return Path(path) if Path(path).is_absolute() else CONFIG_DIR / path
 
 
 @dataclass
@@ -71,7 +93,6 @@ class TrialConfig:
     ir_channel: str = "DIGITAL-IN-01"
     ir_edge: str = "falling"
     ir_threshold: float = 1.0
-    keep_artifacts: bool = False
 
     @property
     def offset_ms(self) -> float:
@@ -85,12 +106,11 @@ class TrialConfig:
             raise ValueError(f"trial window {self.window_ms} ms is not a whole number of {self.bin_ms:g} ms bins")
         return int(length // self.bin_ms)
 
-    def load_trials_kwargs(self) -> dict:
-        """Keyword arguments of `intan_binning.load_trials`."""
+    def stream_kwargs(self) -> dict:
+        """Trial and IR keyword arguments of `intan_binning.IntanStream`."""
         return dict(
             ir_channel=self.ir_channel, edge=self.ir_edge, trial_ms=self.num_bins * self.bin_ms,
             offset_ms=self.offset_ms, bin_ms=self.bin_ms, analog_threshold=self.ir_threshold,
-            no_artifacts=not self.keep_artifacts,
         )
 
 
@@ -119,8 +139,20 @@ class OnlineConfig:
     stim: StimConfig = field(default_factory=StimConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     trial: TrialConfig = field(default_factory=TrialConfig)
+    spikes: SpikeConfig = field(default_factory=SpikeConfig)
     offline: OfflineConfig = field(default_factory=OfflineConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+
+    def intan_stream_kwargs(self) -> dict:
+        """Keyword arguments of `intan_binning.IntanStream`: sample rate, trial, IR and spike detection."""
+        return dict(
+            sample_rate=self.recording.sample_rate, **self.trial.stream_kwargs(),
+            **{f.name: getattr(self.spikes, f.name) for f in fields(SpikeConfig)}
+            | {
+                "positions_file": self.spikes.config_path(self.spikes.positions_file),
+                "template_file": self.spikes.config_path(self.spikes.template_file),
+            },
+        )
 
     def data_path(self, path: str | Path | None) -> Path | None:
         """`path` under this machine's data root, unless it is absolute."""
@@ -170,8 +202,19 @@ def _section(cls, raw: dict | None, name: str):
     })
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that refuses a key given twice in one mapping (PyYAML keeps the last silently)."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        repeated = sorted({k for k in keys if keys.count(k) > 1})
+        if repeated:
+            raise ValueError(f"keys given more than once {node.start_mark}: {repeated}")
+        return super().construct_mapping(node, deep=deep)
+
+
 def load_config(path: str | Path = DEFAULT_CONFIG) -> OnlineConfig:
-    raw = yaml.safe_load(Path(path).read_text()) or {}
+    raw = yaml.load(Path(path).read_text(), Loader=_UniqueKeyLoader) or {}
     sections = {f.name: f.default_factory for f in fields(OnlineConfig)}
     unknown = set(raw) - set(sections)
     if unknown:
@@ -180,4 +223,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> OnlineConfig:
         name: _section(factory().__class__, raw.get(name), name) for name, factory in sections.items()
     })
     cfg.trial.window_ms = tuple(float(t) for t in cfg.trial.window_ms)
+    cfg.spikes.band_hz = tuple(float(f) for f in cfg.spikes.band_hz)
+    if cfg.spikes.local_radius is not None:
+        cfg.spikes.local_radius = tuple(float(r) for r in cfg.spikes.local_radius)
     return cfg

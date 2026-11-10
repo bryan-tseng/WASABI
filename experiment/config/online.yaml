@@ -3,12 +3,11 @@
 # line override the values here.
 
 paths:
-  # Relative to this machine's data_root_prefix, for online
-  data_root: "Current Project Databases - NHP/2025 Cerebellum prosthesis/"
-  # Relative to data_root, or absolute, for online data collection
-  recording_dir: "WASABI_test_data/test_data1_261103_114440"
-  control_file: null    # (n_trials, T, recording.num_channels) .npy, e.g. from intan_binning.py --ir
+  # Data paths: relative to this machine's data_root_prefix in machines.yaml (no leading /), or absolute
+  control_data_dir: "WASABI_test_data/control_test_data_261110_153932"
   # Output files go in <results_dir>/online, offline or simulation, by session.source
+  wasabi_data_dir: "WASABI_test_data/control_test_data_261110_154216"
+  # (n_trials, T, recording.num_channels) .npy, or a recording folder with its control_trials.npy (control_fitting.py)
   results_dir: "results"             # relative to the WASABI repo, or absolute
   output: "next_stim.json"           # next stim, rewritten after every trial
   history: null                      # null: history_<strategy>_<date>_<time>.npz, e.g. history_tiled_...
@@ -30,21 +29,33 @@ stim:
   blank_after_ms: 20.0    # extra blanking after stim ends (stim itself is always blanked)
 
 recording:
-  num_channels: 128      # recorded channels the dynamics are fit on
+  num_channels: 64      # recorded channels the dynamics are fit on
+  sample_rate: 30000.0   # Hz, as set in RHX
 
 offline:
   # Recorded stim session replayed by source: offline, from its RCP_analysis checkpoints
-  session_dir: "Nike/20251203_NRR_RW011"            # relative to data_root, or absolute
+  session_dir: "Nike/20251203_NRR_RW011"            # relative to data_root_prefix, or absolute
   intan_files: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]   # stim conditions; their stims are the candidates
   control_files: [1, 3]                              # no-stim reaching blocks, for the control fit
 
 trial:
   bin_ms: 20.0                  # as NPRW_rate_est.bin_ms in RCP_analysis
   window_ms: [-800.0, 600.0]    # trial window around the IR crossing
-  ir_channel: DIGITAL-IN-01     # "USB board digital input channel" 1; or ANALOG-IN-x
-  ir_edge: falling              # DIGITAL-IN-01 is high until the beam is crossed
+  ir_channel: DIGITAL-IN-02     # "USB board digital input channel" 1; or ANALOG-IN-x
+  ir_edge: falling              # DIGITAL-IN-02 is high until the beam is crossed
   ir_threshold: 1.0             # volts, analog IR only
-  keep_artifacts: false         # keep spikes Spike Scope flags as artifacts (spike ID 128)
+
+spikes:
+  # Detected causally from amplifier.dat, as it is written: bandpass, common reference, threshold
+  band_hz: [300.0, 10000.0]      # Butterworth bandpass
+  filter_order: 3
+  reference: median             # median | mean | none: subtracted across channels at each sample
+  local_radius: [30.0, 150.0]
+  positions_file: probes/ImecPrimateStimRec128.mat
+  template_file: waveform_templates/median_extremum_templates_norm_NPRW.npy   # matched filter waveform; null: threshold the signal
+  threshold: 4                # spike = matched filter output above threshold x its noise SD (median(|y|) / 0.6745)
+  refractory_ms: 1.0            # crossings closer than this on one channel count once
+  noise_s: 10.0                 # noise SD estimated over the first noise_s seconds, then fixed
 
 model:
   latents: 4

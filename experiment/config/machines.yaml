@@ -1,5 +1,6 @@
 machines:
   raynor-pc: # Bryan
-    data_root_prefix: "/home/bryan/mnt/cullen_data/"
+    data_root_prefix: "/home/bryan/mnt/cullen_data/Current Project Databases - NHP/2025 Cerebellum prosthesis/"
+    code_root_prefix: "/home/bryan/Documents/workspace/"
   NikitaTower: # Nikita
     data_root_prefix: "Y:/"

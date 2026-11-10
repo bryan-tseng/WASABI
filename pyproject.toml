@@ -10,6 +10,7 @@ dependencies = [
     "numpy",
     "optax>=0.2.8",
     "pyyaml>=6.0.3",
+    "scipy>=1.18.0",
     "tqdm",
 ]
 
