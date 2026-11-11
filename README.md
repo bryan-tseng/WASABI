@@ -27,8 +27,9 @@ Folder structure:
 │   │   └── waveform_templates # spike waveforms for the matched filter
 │   └── src
 │       ├── wasabi_online.py   # the experiment: fit, choose a stim, update after each trial
-│       ├── control_fitting.py # cut a control recording into control trials
-│       ├── intan_binning.py   # spike detection and binning from RHX amplifier.dat
+│       ├── control_preproc.py # cut a control recording into control trials
+│       ├── control_sorting.py # (placeholder) spike template from sorting the control recording
+│       ├── intan_rt_proc.py   # spike detection and binning from RHX amplifier.dat
 │       ├── config_loading.py  # reads online.yaml
 │       ├── offline_data.py    # recorded sessions replayed by --source offline
 │       └── tcp                # live RHX data over TCP
@@ -130,22 +131,31 @@ In RHX, save as **"One File Per Signal Type"**: the code reads `amplifier.dat`,
 ```bash
 # 1. once per control recording: detect spikes, cut trials at the IR crossings and save
 #    them as control_trials.npy in control_data_dir
-uv run python experiment/src/control_fitting.py
+uv run python experiment/src/control_preproc.py
 
 # 2. start the RHX recording, then
 uv run python experiment/src/wasabi_online.py
 ```
 After the control fit, the channels to stimulate are printed and written to
-`results/online/next_stim.json`. Deliver that stim on the next IR trial; once the trial
-has been recorded press any key, and the next stim is printed (`q` quits). The history of
-the session is saved to `results/online/history_<strategy>_<date>_<time>.npz` after
-every trial.
+`results/online/next_stim.json`. Deliver that stim on the next IR trial. What reads the
+trial is `session.trigger`:
+- `DIGITAL-IN-02` (the `trial.ir_channel`): the first IR crossing written after the stim
+  was printed is the trial, read as soon as its window has been recorded; then the next
+  stim is printed. Crossings before that (made with the previous stim) are skipped.
+  Ctrl-C stops.
+- `keypress`: press any key once the trial has been recorded (`q` quits); the earliest
+  IR trial not yet used is read.
+
+The history of the session is saved to
+`results/online/history_<strategy>_<date>_<time>.npz` after every trial.
 
 - Spikes are detected from `amplifier.dat` as it is written: bandpass, local median
   reference, matched filter with the template, and a threshold on its noise SD from the
-  first `noise_s` seconds of the recording, so keep those free of stimulation.
-- Trials are taken in the order of the IR crossings in the recording, from its start.
-  Break the beam only once the first stim is printed.
+  first `noise_s` seconds of the recording, so keep those free of stimulation. After those,
+  detection waits during the control fit, then picks up 1 s before the first stim is printed
+  (the 0.8 s before the trial window and 0.2 s for the filter to settle); trials start there.
+- With `keypress`, trials are taken in the order of the IR crossings from the first stim
+  on; IR crossings before it are not read.
 - `scripts/inspect_amplifier.ipynb` steps through the spike detection on a window of a
   recording, to check the settings.
 

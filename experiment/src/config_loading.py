@@ -39,7 +39,10 @@ class SessionConfig:
     max_trials: int = 500
     seed: int = 0
     num_control: int = 100
-    wait_for_key: bool = True
+    # What starts reading the next trial: "keypress"; an IR input such as "DIGITAL-IN-02"
+    # (online only, the trial.ir_channel), as soon as a trial on it is complete; or "auto",
+    # straight away (sim, offline)
+    trigger: str = "keypress"
 
 
 @dataclass
@@ -60,7 +63,7 @@ class RecordingConfig:
 
 @dataclass
 class SpikeConfig:
-    """Spike detection on amplifier.dat (see `intan_binning.SpikeDetector`)."""
+    """Spike detection on amplifier.dat (see `intan_rt_proc.SpikeDetector`)."""
 
     band_hz: tuple[float, float] = (300.0, 6000.0)
     filter_order: int = 3
@@ -107,7 +110,7 @@ class TrialConfig:
         return int(length // self.bin_ms)
 
     def stream_kwargs(self) -> dict:
-        """Trial and IR keyword arguments of `intan_binning.IntanStream`."""
+        """Trial and IR keyword arguments of `intan_rt_proc.IntanStream`."""
         return dict(
             ir_channel=self.ir_channel, edge=self.ir_edge, trial_ms=self.num_bins * self.bin_ms,
             offset_ms=self.offset_ms, bin_ms=self.bin_ms, analog_threshold=self.ir_threshold,
@@ -124,6 +127,7 @@ class ModelConfig:
     # Keep the stim-input offset b at its control-fit value (control trials have no stim, so
     # that is its initial value). Refitting b rescales u(s) without rescaling the B posterior.
     freeze_b: bool = True
+    device: str = "gpu"  # where JAX fits: gpu (the default device, CPU if there is no GPU) | cpu
 
     @property
     def refit_fields(self) -> tuple[str, ...]:
@@ -144,7 +148,7 @@ class OnlineConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
 
     def intan_stream_kwargs(self) -> dict:
-        """Keyword arguments of `intan_binning.IntanStream`: sample rate, trial, IR and spike detection."""
+        """Keyword arguments of `intan_rt_proc.IntanStream`: sample rate, trial, IR and spike detection."""
         return dict(
             sample_rate=self.recording.sample_rate, **self.trial.stream_kwargs(),
             **{f.name: getattr(self.spikes, f.name) for f in fields(SpikeConfig)}

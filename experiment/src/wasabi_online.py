@@ -1,8 +1,9 @@
 """Run WASABI closed-loop during an experiment.
 
 The script stays running. After the initial fit it prints the stim channels for the
-first trial; each key press then marks that the trial has been delivered and its data
-is ready (or, with session.wait_for_key: false, the next trial starts on its own). The
+first trial. The next trial is then read on a key press (session.trigger: keypress), on
+its own once a trial on the IR input has been recorded after the stim was decided
+(trigger: DIGITAL-IN-02, the trial.ir_channel), or straight away (auto: sim, offline). The
 trial is read from a `TrialSource`, folded into the model with `observe_trial`, and the
 channels for the next trial are printed and written to `paths.output` as JSON, in
 results/online, offline or simulation by source.
@@ -13,7 +14,7 @@ By default 80 channels can be stimulated, in 20 contiguous groups of 4, and each
 switches on one group or two groups (20 choose 1 + 20 choose 2 = 210 candidates). Offline,
 the candidates are the stims of the recorded session.
 
-Keys: any key = trial done, q = quit. Ctrl-C stops a run that does not wait for keys.
+Keys (trigger: keypress): any key = trial done, q = quit. Ctrl-C stops the other triggers.
 
     # dry run against simulated data
     uv run python experiment/src/wasabi_online.py --source sim
@@ -123,6 +124,11 @@ class TrialSource(Protocol):
         """Counts of the trial just delivered with `pattern`, or None if not available yet."""
         ...
 
+    # Preprocessing of the data last returned that ran before the call, counted in its load time:
+    # for control_trials, the time control_preproc.py took; for next_trial online, the spike
+    # detection run in the background since the previous trial
+    preprocess_s: float
+
 
 class SimulatedSource:
     """Ground-truth Poisson LDS from the `simulations` package, for dry runs.
@@ -130,6 +136,8 @@ class SimulatedSource:
     The ground truth has `num_channels` recorded channels; stim patterns cover the first
     channels of them.
     """
+
+    preprocess_s = 0.0  # trials are simulated when asked for
 
     def __init__(
         self, design: TrialDesign, num_channels: int, num_control: int, latents: int = 4, seed: int = 0
@@ -196,6 +204,8 @@ class OfflineSource:
     used drops out of `available`.
     """
 
+    preprocess_s = 0.0  # spikes were detected beforehand, in RCP_analysis
+
     def __init__(self, session, num_stim_channels: int):
         self.session = session
         self.candidates = np.zeros((len(session.conditions), num_stim_channels))
@@ -224,63 +234,101 @@ class OfflineSource:
         return trial
 
 
-def load_control_trials(path: Path, num_channels: int) -> np.ndarray:
+def load_control_trials(path: Path, num_channels: int) -> tuple[np.ndarray, float]:
     """(n_trials, T, N) control trials from a .npy, or from the control_trials.npy in a recording folder."""
-    from intan_binning import TRIALS_FILE
+    from intan_rt_proc import TRIALS_FILE
 
     if path.is_dir():
         if not (path / TRIALS_FILE).exists():
             raise FileNotFoundError(
                 f"no {TRIALS_FILE} in {path}; make it with\n"
-                f'    uv run python experiment/src/control_fitting.py "{path}"'
+                f'    uv run python experiment/src/control_preproc.py "{path}"'
             )
         path = path / TRIALS_FILE
     Y = np.load(path).astype(float)
     if Y.ndim != 3 or Y.shape[2] != num_channels:
         raise ValueError(f"control trials must be (n_trials, T, {num_channels}), got {Y.shape}")
-    return Y
+    info = path.with_suffix(".json")  # written by control_preproc.py
+    if not info.exists():
+        print(f"  no {info.name} beside {path.name}: control load time leaves out the preprocessing")
+        return Y, 0.0
+    return Y, json.loads(info.read_text())["preprocess_s"]
 
 
 class IntanSource:
     """Reads trials from the Intan RHX recording in progress, cut at IR crossings.
 
     Spikes are detected from amplifier.dat in a background thread as it is written (see
-    `intan_binning.IntanStream`), so on each key press only the last few samples remain to
-    be processed before the next complete trial not yet used is taken.
+    `intan_rt_proc.IntanStream`). Until the first stim is decided only the first noise_s
+    seconds are processed, for the thresholds; `start_trials` then jumps to just before the
+    present, so the trials start there. On each key press the thread is left to process
+    what is on disk, and the next complete trial not yet used is taken.
+
+    With an IR trigger, `arm` is called once the stim is decided, and only IR crossings
+    written after it count: earlier ones were delivered with the previous stim, or none.
+    The background thread keeps up on its own, so nothing is waited for.
     """
 
-    def __init__(self, recording_dir: Path, control_file: Path, num_channels: int, **stream_kwargs):
-        from intan_binning import IntanStream
+    WARMUP_S = 0.2  # processed before the earliest trial window after the jump, for the filter to settle
+
+    def __init__(
+        self, recording_dir: Path, control_file: Path, num_channels: int, ir_trigger: bool = False,
+        **stream_kwargs,
+    ):
+        from intan_rt_proc import IntanStream
 
         self.control_file = Path(control_file)
         self.num_channels = num_channels
+        self.ir_trigger = ir_trigger
         self.stream = IntanStream(recording_dir, **stream_kwargs)
         if len(self.stream.channels) != num_channels:
             raise ValueError(
                 f"{recording_dir} has {len(self.stream.channels)} amplifier channels, "
                 f"recording.num_channels is {num_channels}"
             )
-        self.stream.start()
-        self.num_used = 0
+        # Only the noise estimate while the control fit runs; trials start at `start_trials`
+        self.stream.hold()
+        self.stream.start() # Creates background thread
+        self.first_onset = 0  # earliest IR crossing sample that can be the next trial
+        self.preprocess_s = 0.0
+        self._process_s_counted = 0.0  # stream.process_s already counted in a trial's load time
 
     def control_trials(self) -> np.ndarray:
-        return load_control_trials(self.control_file, self.num_channels)
+        Y, self.preprocess_s = load_control_trials(self.control_file, self.num_channels)
+        return Y
+
+    # First stim decided: skip to just before now, as no earlier trial can be used
+    def start_trials(self) -> None:
+        now = self.stream.num_written()
+        margin = round(self.WARMUP_S * self.stream.sample_rate) - self.stream.offset_samples  # 0.2 + 0.8 s
+        self.stream.resume(now - margin)
+        self.first_onset = max(self.first_onset, now)
+
+    # IR trigger: the stim is decided now, so the next trial is the first IR crossing after this
+    def arm(self) -> None:
+        self.first_onset = max(self.first_onset, self.stream.num_written())
 
     def next_trial(self, pattern: np.ndarray) -> np.ndarray | None:
         self.stream.check()
-        self.stream.update()  # catch up on the samples written since the thread last looked
-        onsets = self.stream.onsets()
-        if len(onsets) <= self.num_used:
+        background_s = self.stream.process_s - self._process_s_counted
+        if not self.ir_trigger:
+            self.stream.catch_up()  # wait for the thread to process what is on disk at the key press
+        onsets = self.stream.onsets()  # IR crossings whose trial is complete
+        onsets = onsets[onsets >= self.first_onset]
+        if not len(onsets):
             return None
-        onset = onsets[self.num_used]
-        if len(onsets) > self.num_used + 1:
+        # The catch-up above is timed by the caller, so count only what ran in the background
+        self.preprocess_s = background_s
+        self._process_s_counted = self.stream.process_s
+        onset = onsets[0]
+        if len(onsets) > 1:
             print(
-                f"  warning: {len(onsets) - self.num_used} new IR trials since the last key "
-                f"press; using the earliest, at {self.stream.onset_time(onset):.3f} s"
+                f"  warning: {len(onsets)} new IR trials since the last one used; "
+                f"using the earliest, at {self.stream.onset_time(onset):.3f} s"
             )
         else:
             print(f"  IR trial at {self.stream.onset_time(onset):.3f} s")
-        self.num_used += 1
+        self.first_onset = onset + 1
         return self.stream.trial(onset)  # (T, N) spike counts
 
 
@@ -340,17 +388,19 @@ class OnlineSession:
     evaluate: Callable[[object, BPosterior], dict] | None = None
     trial: int = 0
     choice: int = -1
-    # Per trial: choice, logdet, refit_loss, load_s (reading the trial), fitting_s (filter
+    # Per trial: choice, logdet, refit_loss, load_s (preprocessing and reading the trial),
+    # wait_s (the part of load_s after the key press, or in the poll that found the trial), fitting_s (filter
     # and refit), and the fitted B mean (K, S), C (N, K) and b after it (B_trial, C_trial,
     # b_trial). Per stim decision, one more than trials (entry 0 is the first stim):
     # acquisition_s (scoring the candidates) and decided_at (Unix time), and for DOptimal the
     # decision variable: scores (n_candidates,) and score_prior_logdet, the prior's log det
     history: dict = field(default_factory=lambda: {
-        "choice": [], "logdet": [], "refit_loss": [], "load_s": [], "fitting_s": [],
+        "choice": [], "logdet": [], "refit_loss": [], "load_s": [], "wait_s": [], "fitting_s": [],
         "acquisition_s": [], "decided_at": [], "B_trial": [], "C_trial": [], "b_trial": [],
     })
     fit_losses: np.ndarray | None = None  # control fit loss per step
     fit_converged: bool = False
+    control_load_s: float = float("nan")  # preprocessing and reading the control trials
     control_fit_s: float = float("nan")
 
     @classmethod
@@ -434,7 +484,7 @@ class OnlineSession:
         self.history["decided_at"].append(time.time())
         return self.choice
 
-    def update(self, ys: np.ndarray, load_s: float = float("nan")) -> int:
+    def update(self, ys: np.ndarray, load_s: float = float("nan"), wait_s: float = float("nan")) -> int:
         """Fold in the trial just delivered with the current choice, then pick the next stim."""
         ys = np.array(ys, dtype=float)
         if ys.shape != (self.design.num_timesteps, self.model.num_channels):
@@ -455,6 +505,7 @@ class OnlineSession:
         # float() above waits for the results, so this times the whole filter and refit
         self.history["fitting_s"].append(time.perf_counter() - t0)
         self.history["load_s"].append(load_s)
+        self.history["wait_s"].append(wait_s)
         # Fitted stim effect after the trial, so B can be compared across trials (e.g. with the
         # final B offline): C B u is the same in any latent basis, u = u(s; b) of this trial
         self.history["B_trial"].append(np.asarray(self.prior.B))
@@ -483,6 +534,7 @@ class OnlineSession:
             **{name: np.array(v) for name, v in self.history.items()},
             candidates=self.candidates,
             B_mean=np.asarray(self.prior.B),
+            control_load_s=self.control_load_s,
             control_fit_s=self.control_fit_s,
             control_fit_losses=self.fit_losses,
             control_fit_converged=self.fit_converged,
@@ -573,7 +625,7 @@ class Running:
         return False
 
 
-def announce(selection: dict, path: Path, wait: bool = True) -> None:
+def announce(selection: dict, path: Path, trigger: str = "keypress") -> None:
     write_selection(selection, path)
     groups = ", ".join(str(g) for g in selection["groups"])
     bar = "=" * 72
@@ -584,8 +636,10 @@ def announce(selection: dict, path: Path, wait: bool = True) -> None:
         f"{bar}",
         "1;32",
     ))
-    if wait:
+    if trigger == "keypress":
         print("  Waiting: deliver this stim, then press any key when the trial is done (q to quit)", flush=True)
+    elif trigger != "auto":
+        print(f"  Waiting for the next trial on {trigger}: deliver this stim (Ctrl-C to stop)", flush=True)
     else:
         print("  Starting the next trial (Ctrl-C to stop)", flush=True)
 
@@ -603,7 +657,7 @@ def parse_args():
     parser.add_argument("--wasabi-data-dir", type=Path, help="Intan RHX recording folder of the session (online)")
     parser.add_argument(
         "--control-data-dir", type=Path,
-        help="control trials: a recording folder with control_trials.npy (control_fitting.py), or an (n_trials, T, N) .npy",
+        help="control trials: a recording folder with control_trials.npy (control_preproc.py), or an (n_trials, T, N) .npy",
     )
     parser.add_argument("--history", type=Path)
     return parser.parse_args()
@@ -620,6 +674,7 @@ def make_design(
     onset_ms = -offset_ms
     stim_bin = int(np.floor(onset_ms / bin_ms))
     stim_bins = int(np.ceil((onset_ms + stim_ms) / bin_ms)) - stim_bin
+    # Artifact removal included
     blank_end = int(np.ceil((onset_ms + stim_ms + blank_after_ms) / bin_ms))
     if not 0 <= stim_bin < num_bins or blank_end > num_bins or stim_bins < 1:
         raise ValueError(
@@ -646,7 +701,8 @@ def make_source(cfg: OnlineConfig, design: TrialDesign, recorded=None) -> TrialS
         if cfg.paths.wasabi_data_dir is None or control_file is None:
             raise SystemExit("source online needs paths.wasabi_data_dir and paths.control_data_dir")
         return IntanSource(
-            cfg.data_path(cfg.paths.wasabi_data_dir), control_file, n, **cfg.intan_stream_kwargs()
+            cfg.data_path(cfg.paths.wasabi_data_dir), control_file, n,
+            ir_trigger=cfg.session.trigger not in ("keypress", "auto"), **cfg.intan_stream_kwargs(),
         )
     raise SystemExit(f"unknown source {source!r}: sim, offline or online")
 
@@ -658,6 +714,12 @@ def round_up(n: int, multiple: int) -> int:
 def main():
     args = parse_args()
     cfg = load_config(args.config)
+    # JAX device, set before the first JAX computation picks one
+    if cfg.model.device not in ("gpu", "cpu"):
+        raise SystemExit(f"model.device must be gpu or cpu, got {cfg.model.device!r}")
+    if cfg.model.device == "cpu":
+        jax.config.update("jax_platforms", "cpu")
+    print(f"JAX fitting on {jax.devices()[0]}")
     # Command-line paths are used as given; config paths are relative to the data root
     if args.source is not None:
         cfg.session.source = args.source
@@ -668,6 +730,18 @@ def main():
         if value is not None:
             setattr(cfg.paths, name, str(value.resolve()))
     trial, stim, session = cfg.trial, cfg.stim, cfg.session
+
+    # What reads the next trial; an IR trigger takes the first IR crossing after the stim is decided
+    trigger = session.trigger
+    if trigger not in ("keypress", "auto") and session.source != "online":
+        print(f"session.trigger {trigger}: source {session.source} has no IR input, so trials run straight away (auto)")
+        trigger = "auto"
+    keypress = trigger == "keypress"
+    ir_trigger = trigger not in ("keypress", "auto")
+    if ir_trigger and trigger != trial.ir_channel:
+        raise SystemExit(
+            f"session.trigger {trigger!r}: keypress, auto, or the IR input trial.ir_channel ({trial.ir_channel})"
+        )
 
     # Offline, the recorded session sets the candidates and the stim duration
     recorded = None
@@ -731,7 +805,9 @@ def main():
     history_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Fitting control trials
+    t0 = time.perf_counter()
     Y_control = source.control_trials()
+    control_load_s = source.preprocess_s + time.perf_counter() - t0  # preprocessing, then reading
     if Y_control.shape[2] != cfg.recording.num_channels:
         raise SystemExit(
             f"control trials have {Y_control.shape[2]} channels, recording.num_channels is "
@@ -743,45 +819,53 @@ def main():
             session.seed, available,
             source.evaluator(candidates) if isinstance(source, SimulatedSource) else None,
         )
+    online.control_load_s = control_load_s
     losses = online.fit_losses
     status = "converged" if online.fit_converged else "hit the step limit before converging"
     print(
-        f"  control fit NLL per bin {losses[0]:.4f} -> {losses[-1]:.4f} in {len(losses)} steps ({status}), "
-        f"{online.control_fit_s:.1f} s; first stim chosen in {online.history['acquisition_s'][0]:.1f} s"
+        f"  control fit NLL per bin {losses[0]:.4f} -> {losses[-1]:.4f} in {len(losses)} steps ({status}) | "
+        f"load {online.control_load_s:.2f} s, fitting {online.control_fit_s:.2f} s, "
+        f"acquisition {online.history['acquisition_s'][0]:.2f} s"
     )
 
     # Announce initial selection of stimuli
-    wait = session.wait_for_key
-    announce(online.selection(stim.channel_base), output, wait)
+    announce(online.selection(stim.channel_base), output, trigger)
+    if isinstance(source, IntanSource):
+        source.start_trials()  # spike detection resumes just before now
+    if ir_trigger:
+        source.arm()
 
     try:
         while online.trial < max_trials:
             # Quit if user presses 'q'
-            if wait and wait_for_key().lower() == "q":
+            if keypress and wait_for_key().lower() == "q":
                 break
             t0 = time.perf_counter()
             ys = source.next_trial(online.candidates[online.choice])
-            load_s = time.perf_counter() - t0
+            wait_s = time.perf_counter() - t0
             if ys is None:
-                if wait:
+                if keypress:
                     print("  no new trial data yet; press a key again once it is written", flush=True)
                 else:
-                    time.sleep(0.2)  # poll until the trial has been recorded
+                    time.sleep(0.05 if ir_trigger else 0.2)  # poll until the trial has been recorded
                 continue
             with Running(f"updating the model with trial {online.trial}, choosing the next stim"):
-                online.update(ys, load_s)
+                online.update(ys, source.preprocess_s + wait_s, wait_s)
                 online.save_history(history_path)
             h = online.history
             err = f", effect err {h['effect_err'][-1]:.3f}" if "effect_err" in h else ""
             print(
                 f"  logdet {h['logdet'][-1]:.1f}, NLL {h['refit_loss'][-1]:.4f}{err} | "
-                f"load {h['load_s'][-1]:.2f} s, fitting {h['fitting_s'][-1]:.2f} s, "
+                f"load {h['load_s'][-1]:.2f} s ({h['wait_s'][-1]:.2f} s {'after the key press' if keypress else 'catching up'}), "
+                f"fitting {h['fitting_s'][-1]:.2f} s, "
                 f"acquisition {h['acquisition_s'][-1]:.2f} s"
             )
             if online.choice < 0:
                 print("\nEvery recorded trial has been used.")
                 break
-            announce(online.selection(stim.channel_base), output, wait)
+            announce(online.selection(stim.channel_base), output, trigger)
+            if ir_trigger:
+                source.arm()
     except KeyboardInterrupt:
         pass
     finally:

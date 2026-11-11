@@ -3,11 +3,9 @@
 # line override the values here.
 
 paths:
-  # Data paths: relative to this machine's data_root_prefix in machines.yaml (no leading /), or absolute
-  control_data_dir: "WASABI_test_data/control_test_data_261110_153932"
-  # Output files go in <results_dir>/online, offline or simulation, by session.source
-  wasabi_data_dir: "WASABI_test_data/control_test_data_261110_154216"
-  # (n_trials, T, recording.num_channels) .npy, or a recording folder with its control_trials.npy (control_fitting.py)
+  # Data paths: relative to this machine's data_root_prefix in machines.yaml
+  control_data_dir: "WASABI_test_data/control_test_data_13_trials" # TODO change this during an experiment
+  wasabi_data_dir: "WASABI_test_data/wasabi_test_data_261111_100347" # TODO change this during an experiment
   results_dir: "results"             # relative to the WASABI repo, or absolute
   output: "next_stim.json"           # next stim, rewritten after every trial
   history: null                      # null: history_<strategy>_<date>_<time>.npz, e.g. history_tiled_...
@@ -18,7 +16,7 @@ session:
   max_trials: 500
   seed: 0
   num_control: 20       # simulated control trials (for sim only)
-  wait_for_key: True     # false: start the next trial as soon as the stim is decided (sim, offline)
+  trigger: DIGITAL-IN-02 # keypress | DIGITAL-IN-02 (the trial.ir_channel: next trial read once one is complete after the stim is decided) | auto (sim, offline)
 
 stim:
   num_channels: 80       # channels available to stimulate (offline: set by the recorded stims)
@@ -29,14 +27,8 @@ stim:
   blank_after_ms: 20.0    # extra blanking after stim ends (stim itself is always blanked)
 
 recording:
-  num_channels: 64      # recorded channels the dynamics are fit on
+  num_channels: 64      # TODO change this during an experiment
   sample_rate: 30000.0   # Hz, as set in RHX
-
-offline:
-  # Recorded stim session replayed by source: offline, from its RCP_analysis checkpoints
-  session_dir: "Nike/20251203_NRR_RW011"            # relative to data_root_prefix, or absolute
-  intan_files: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]   # stim conditions; their stims are the candidates
-  control_files: [1, 3]                              # no-stim reaching blocks, for the control fit
 
 trial:
   bin_ms: 20.0                  # as NPRW_rate_est.bin_ms in RCP_analysis
@@ -64,3 +56,10 @@ model:
   initial_fit_tol: 1.0e-4      # control fit stops when the loss improves less than this (relative) over 100 steps
   initial_fit_max_steps: 5000  # hard limit on control fit steps
   freeze_b: false               # keep the stim-input offset b fixed after the control fit (refitting it rescales u(s) under the B posterior)
+  device: gpu                   # gpu | cpu: where the JAX fitting runs
+
+offline:
+  # Recorded stim session replayed by source: offline, from its RCP_analysis checkpoints
+  session_dir: "Nike/20251203_NRR_RW011"            # relative to data_root_prefix, or absolute
+  intan_files: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]   # stim conditions; their stims are the candidates
+  control_files: [1, 3]                              # no-stim reaching blocks, for the control fit
