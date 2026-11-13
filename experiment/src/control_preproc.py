@@ -1,13 +1,14 @@
-"""Cut a finished Intan RHX recording into control trials for `wasabi_online`.
+"""Preprocess a finished Intan recording into control trials to warmstart `wasabi_online`.
+Using functions in `intan_rt_proc` so stays consistent with online config (e.g. bin width, trial window ... etc.)
 
-Detects spikes in the recording's amplifier.dat, cuts it into trials at the IR crossings and
-bins each one, all with the functions of `intan_rt_proc` and the settings of the online
-config: bin width and trial window ('trial'), IR channel and edge, spike detection
-('spikes') and recording.sample_rate. The (n_trials, T, N) counts are saved as control_trials.npy in
-the recording folder, so `paths.control_data_dir` (or --control-data-dir) can be that folder,
-with a .json beside it holding the preprocessing time, IR onsets and channel names.
+1. Detects spikes in the recording's amplifier.dat
+2. Cuts it into trials at the IR crossings
+3. Binning each trial
+4. Save processed counts in `paths.control_data_dir/control_trials.npy`
+.json file in the same folder saves the preprocessing time, IR onsets and channel names.
 
     uv run python experiment/src/control_preproc.py                  # the folder in paths.control_data_dir
+    
     # specify recording directory
     uv run python experiment/src/control_preproc.py RECORDING_DIR
     # skips preprocessing

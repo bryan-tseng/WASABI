@@ -15,6 +15,7 @@ Trials start at each IR crossing (`edge` of `ir_channel`) and span `offset_ms` t
 `control_preproc.py` is the command line that uses these to make control trials.
 """
 
+import bisect
 import csv
 import threading
 import time
@@ -22,7 +23,6 @@ import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from matplotlib.style import available
 import numpy as np
 from scipy import io, signal
 
@@ -34,7 +34,8 @@ TRIALS_FILE = "control_trials.npy"  # control trials in a recording folder (cont
 
 def _enabled_channels(recording_dir: Path, prefix: str | None = None, enabled_only: bool = True) -> list[str]:
     """Native names of the enabled channels, in the order RHX saves them.
-
+    Gets the names from settings.xml
+    
     With `prefix`, of that signal group only (e.g. "ANALOG-IN"); without, of the amplifier
     ports, whose prefixes are single letters (A, B, C, D, ...). With `enabled_only` False,
     of every channel, enabled or not.
@@ -49,12 +50,12 @@ def _enabled_channels(recording_dir: Path, prefix: str | None = None, enabled_on
         for g in groups for ch in g.iter("Channel") if ch.get("Enabled") == "True" or not enabled_only
     ]
 
-
+# General memmap .dat file reader helper
 def _read_rows(path: Path, dtype: str, num_cols: int, start: int, stop: int | None = None) -> np.ndarray:
     """Rows [start, stop) of a growing interleaved (n_rows, num_cols) file; only whole rows.
-    Each row is a 0.25s chunk of the recording.
+    Rows are samples, columns are channels.
     """
-    num_rows = path.stat().st_size // (np.dtype(dtype).itemsize * num_cols)
+    num_rows = path.stat().st_size // (np.dtype(dtype).itemsize * num_cols) # size of the file divided by the size of each row
     stop = num_rows if stop is None else min(stop, num_rows)
     if stop <= start:
         return np.zeros((0, num_cols), dtype=dtype)
@@ -65,10 +66,10 @@ def _read_rows(path: Path, dtype: str, num_cols: int, start: int, stop: int | No
 
 
 class IRReader:
-    """Reads the IR line, True while it is high, from a recording that may still be growing.
+    """Reads the IR line, True while it is high.
 
-    DIGITAL-IN-xx is read from digitalin.dat (one uint16 per sample, bit xx-1 is the
-    channel). ANALOG-IN-x is read from analogin.dat and thresholded at `analog_threshold` V.
+    DIGITAL-IN-xx is read from digitalin.dat (one uint16 per sample, bit xx-1 is the channel).
+    ANALOG-IN-x is read from analogin.dat and thresholded at `analog_threshold` V.
     """
 
     def __init__(self, recording_dir: Path, ir_channel: str = "DIGITAL-IN-01", analog_threshold: float = 1.0):
@@ -90,15 +91,15 @@ class IRReader:
             raise ValueError(f"IR channel must be DIGITAL-IN-xx or ANALOG-IN-x, got {ir_channel}")
 
     def num_samples(self) -> int:
-        return self.path.stat().st_size // (2 * self.num_cols)
+        return self.path.stat().st_size // (2 * self.num_cols) # size of the file divided by the size of each row (2 bytes per sample) and num_channels
 
     def read(self, start: int, stop: int) -> np.ndarray:
         raw = _read_rows(self.path, "<u2", self.num_cols, start, stop)[:, self.col]
-        if self.bit is not None:
+        if self.bit is not None: # TODO check if this logic works for analog signal
             return (raw >> self.bit) & 1 == 1
         return ANALOG_VOLTS_PER_BIT * (raw.astype(float) - 32768) > self.analog_threshold
 
-
+# Neighbor calculation helpers
 def load_positions(path: Path, channels: list[str], all_channels: list[str] | None = None) -> np.ndarray:
     """(N, 2) positions of `channels`, NaN where a site is not connected or not in the map.
 
@@ -128,7 +129,7 @@ def load_positions(path: Path, channels: list[str], all_channels: list[str] | No
 
 
 def local_neighbors(positions: np.ndarray, local_radius: tuple[float, float]) -> list[np.ndarray]:
-    """For each channel, the channels at distance d with inner < d <= outer."""
+    """For each channel, get the channels between distances with inner < d <= outer."""
     inner, outer = local_radius
     if not 0 <= inner < outer:
         raise ValueError(f"local_radius must be (inner, outer) with 0 <= inner < outer, got {local_radius}")
@@ -139,9 +140,9 @@ def local_neighbors(positions: np.ndarray, local_radius: tuple[float, float]) ->
 class SpikeDetector:
     """Causal bandpass, common reference, matched filter and threshold on (n_samples, N) chunks.
 
-    Feed consecutive chunks to `process`; it returns the (sample, channel) of the spikes it
-    detected, samples counted from the first chunk. Until `noise_s` seconds have been seen
-    the chunks are held back to estimate the thresholds, so they come out later in one go.
+    Feed consecutive chunks to `process`; it returns the detected spikes as (sample, channel), samples counted from the first chunk.
+    
+    Before processing, it holds a buffer of up to `noise_s` seconds of data, to estimate the thresholds used for matched filter, and then starts estimating the spikes.
     """
 
     def __init__(
@@ -189,7 +190,7 @@ class SpikeDetector:
 
     # Skip ahead: the next chunk starts at `sample`, so drop the state carried over from the last one
     def restart(self, sample: int) -> None:
-        """Continue at recording sample `sample` after a gap, keeping the thresholds."""
+        """Continue at recording sample `sample` after a gap, keeping the thresholds but dropping the states from last chunk."""
         if self.thresholds is None or self.pending:
             raise RuntimeError("restart only after the thresholds are set and every chunk is searched")
         self.zi = None  # the filter starts again in steady state at the next chunk's first sample
@@ -199,7 +200,7 @@ class SpikeDetector:
         self.last_spike[:] = -np.inf
 
     # Step 1-2: bandpass, then subtract the common reference
-    def filter(self, raw: np.ndarray) -> np.ndarray:
+    def _filter(self, raw: np.ndarray) -> np.ndarray:
         """Bandpass and common-reference the next chunk, (n_samples, N) int16 -> uV."""
         x = raw.astype(np.float32) * AMPLIFIER_UV_PER_BIT
         if self.zi is None:  # start in steady state at the first sample, without a step transient
@@ -209,12 +210,12 @@ class SpikeDetector:
         
         # Common mode median reference
         if self.reference != "none":
-            x -= self.common_reference(x)
+            x -= self._common_reference(x)
         self.num_processed += len(x)
         return x
 
     # Median (or mean) of all channels, or of each channel's ring of neighbors
-    def common_reference(self, x: np.ndarray) -> np.ndarray:
+    def _common_reference(self, x: np.ndarray) -> np.ndarray:
         """The reference subtracted from bandpassed `x`: (n, 1) global, or (n, N) local."""
         operator = np.median if self.reference == "median" else np.mean
         if self.groups is None:
@@ -232,7 +233,7 @@ class SpikeDetector:
         return ref.T
 
     # Step 3: matched filter, correlate each channel with the template
-    def match(self, x: np.ndarray) -> np.ndarray:
+    def _match(self, x: np.ndarray) -> np.ndarray:
         """Matched filter output of the next filtered chunk; y[n] uses samples up to n."""
         if len(self.template) == 1:
             return x * self.template[0]
@@ -268,14 +269,13 @@ class SpikeDetector:
     def process(self, raw: np.ndarray, final: bool = False) -> tuple[np.ndarray, np.ndarray]:
         """Spikes (sample indices, channel indices) found in `raw` and any chunks held back.
 
-        With `final`, held-back chunks are searched even if fewer than `noise_s` seconds
-        have been seen (the noise is then estimated from all of them).
+        With `final`, held-back chunks are searched even if fewer than `noise_s` seconds have been seen (the noise is then estimated from all of them).
         
         This step is run for each 0.25-second chunk of raw data, except for the first 10s where the noise estimate needs to be done.
         """
         # Bandpass filter, common mode reference, and matched filter
         if len(raw):
-            self.pending.append(self.match(self.filter(raw)))
+            self.pending.append(self._match(self._filter(raw)))
         # Hold chunks back until noise_s seconds are in, then set the thresholds from them
         if self.thresholds is None:
             if not self.pending or (self.num_processed < self.noise_samples and not final):
@@ -359,59 +359,86 @@ class IntanStream:
         trial_ms: float = 1400.0,
         offset_ms: float = -800.0,
         bin_ms: float = 20.0,
-        analog_threshold: float = 1.0,
+        analog_threshold: float = 1.0, # TODO need to set this when we include the analog inputs
         chunk_s: float = 0.25, # TODO Can make this a hyperparameter?
         **detection,
     ):
+        # Recording: files and metadata
         self.recording_dir = Path(recording_dir)
         self.amplifier = self.recording_dir / "amplifier.dat"
         if not self.amplifier.exists():
             raise FileNotFoundError(f"{self.amplifier} not found: save as one file per signal type")
-        self.channels = _enabled_channels(self.recording_dir)
+        self.channels = _enabled_channels(self.recording_dir)  # From settings.xml
         if not self.channels:
             raise ValueError(f"no enabled amplifier channels in {self.recording_dir / 'settings.xml'}")
         self.sample_rate = sample_rate
+        
+        self.ir = IRReader(self.recording_dir, ir_channel, analog_threshold) if ir_channel else None  # digitalin.dat or analogin.dat
+        
+        time_path = self.recording_dir / "time.dat"
+        self.t0 = int(np.fromfile(time_path, dtype="<i4", count=1)[0]) if time_path.exists() else 0  # First timestamp of the recording
+
+        # Spike detection
         all_channels = _enabled_channels(self.recording_dir, enabled_only=False)
         self.detector = make_detector(self.channels, sample_rate, all_channels=all_channels, **detection)
-        self.ir = IRReader(self.recording_dir, ir_channel, analog_threshold) if ir_channel else None
-        self.edge = edge
 
+        # Trial and binning geometry, in samples
+        self.edge = edge
         self.bin_samples = round(bin_ms / 1000.0 * sample_rate)
         if not np.isclose(self.bin_samples, bin_ms / 1000.0 * sample_rate):
             raise ValueError(f"{bin_ms:g} ms bins are not a whole number of samples at {sample_rate:g} Hz")
         self.num_bins = int(trial_ms // bin_ms)
         self.trial_samples = self.num_bins * self.bin_samples
         self.offset_samples = round(offset_ms / 1000.0 * sample_rate)
+
+        # Processing settings
         self.chunk_samples = round(chunk_s * sample_rate)
 
-        time_path = self.recording_dir / "time.dat"
-        self.t0 = int(np.fromfile(time_path, dtype="<i4", count=1)[0]) if time_path.exists() else 0
-        self.num_read = 0  # samples read from amplifier.dat (and the IR file)
-        self._spike_chunks: list[tuple[np.ndarray, np.ndarray]] = []  # spike time (sample) and channel of each chunk's spikes, merged by `spikes`
-        self._spikes = (np.zeros(0, dtype=int), np.zeros(0, dtype=int))
+        # Stream position
+        self.num_read = 0  # Samples read from amplifier.dat (and the IR file)
         self._ir_last = None  # IR level at the last sample read
-        self._onsets: list[int] = []
-        self.process_s = 0.0  # time spent reading and detecting spikes, in total
-        self.holding = False  # stop once the thresholds are set, until `resume` (see `hold`)
-        self.valid_from = 0  # trials must start here or later: samples before a jump were skipped
+        self.valid_from = 0  # Trials must start here or later; samples before a jump were skipped
+        self.holding = False  # Stop once the thresholds are set, until `resume`
 
-        self.lock = threading.Lock()
+        # Detected events
+        self._spike_chunks: list[tuple[np.ndarray, np.ndarray]] = []  # (samples, channels) per chunk, merged by `spikes`
+        self._spikes = (np.zeros(0, dtype=int), np.zeros(0, dtype=int))
+        self._onsets: list[int] = []
+
+        # Diagnostics
+        self.process_s = 0.0  # Total time spent reading and detecting
+        self._seen_samples: list[int] = []  # Samples on disk at each `update` that found new ones...
+        self._seen_at: list[float] = []  # ...and the wall time (time.time) it found them
+
+        # Threading
+        self.lock = threading.Lock()  # Guards stream position, detected events and detector
         self._stop = threading.Event()
         self._thread = None
         self.error: Exception | None = None
 
-    # Samples written to both amplifier.dat and the IR file so far
     def _available(self) -> int:
         """
             Returns the number of samples available for reading from both the amplifier and IR files.
             2 bytes x channels per sample is the number of complete samples, so the division drops incomplete samples.
         """
-        n = self.amplifier.stat().st_size // (2 * len(self.channels))
+        n = self.amplifier.stat().st_size // (2 * len(self.channels)) # size of the file divided by the size of each row (2 bytes per sample) and num_channels
         return min(n, self.ir.num_samples()) if self.ir else n
 
     def num_written(self) -> int:
-        """Samples on disk so far, in both amplifier.dat and the IR file (processed or not)."""
+        """Samples on disk so far, in both amplifier.dat and the IR file"""
         return self._available()
+
+    def seen_at(self, stop: int) -> float:
+        """Wall time (time.time) samples [0, stop) were first all seen on disk.
+
+        Seen by `update`, so later than written by up to the thread's poll interval, or by the
+        processing still under way when they were written.
+        """
+        with self.lock:
+            i = bisect.bisect_left(self._seen_samples, stop)
+            if i == len(self._seen_samples):
+                raise ValueError(f"sample {stop} has not been seen on disk yet")
+            return self._seen_at[i]
 
     # Find IR crossings in the next chunk, including one right at the chunk boundary
     def _read_ir(self, start: int, stop: int) -> None:
@@ -424,28 +451,38 @@ class IntanStream:
             if not self._onsets or c >= self._onsets[-1] + self.trial_samples:
                 self._onsets.append(int(c))
 
-    # Read and process every new sample, chunk by chunk
+    # Read and process new samples, chunk by chunk
     def update(self, final: bool = False) -> int:
         """Process every sample written so far; returns how many were new.
 
         With `final` (the recording is done), samples held back for the noise estimate are searched for spikes even if the recording is shorter than `noise_s`.
         While holding, stops once the thresholds are set.
         """
-        stop = self._available()
+        stop = self._available() # current available samples on disk
+        with self.lock:
+            if not self._seen_samples or stop > self._seen_samples[-1]:
+                self._seen_samples.append(stop)
+                self._seen_at.append(time.time())
         num_new = 0
         # Chunking into 0.25-second blocks for processing (7500 samples, one each row of raw).
         # The lock is taken per chunk, so another thread waits for one chunk at most
         while True:
-            with self.lock:
+            with self.lock: # Lock this chunk from other threads
                 if self.num_read >= stop or (self.holding and self.detector.thresholds is not None):
+                    # Stop if no new samples, or if a hold is placed, and thresholds are already set (control fit)
                     break
                 t0 = time.perf_counter()
-                end = min(self.num_read + self.chunk_samples, stop)
+                end = min(self.num_read + self.chunk_samples, stop) # The REAL ending
                 raw = _read_rows(self.amplifier, "<i2", len(self.channels), self.num_read, end)
+                
                 # Do the same for IR
                 if self.ir:
                     self._read_ir(self.num_read, end)
+                
+                # Detect spikes
                 self._add_spikes(self.detector.process(raw))
+                
+                # Update values
                 num_new += end - self.num_read
                 self.num_read = end
                 self.process_s += time.perf_counter() - t0
@@ -464,8 +501,7 @@ class IntanStream:
     def resume(self, sample: int) -> None:
         """Carry on processing from recording sample `sample`, skipping what came before it.
 
-        Without a jump (the thresholds not set yet, or `sample` already read), it carries on
-        from where it stopped.
+        Without a jump (the thresholds not set yet, or `sample` already read), it carries on from where it stopped.
         """
         with self.lock:
             self.holding = False

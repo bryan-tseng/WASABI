@@ -1,10 +1,10 @@
-"""Load the online experiment config, experiment/config/online.yaml by default.
+"""Load the online experiment config, default: experiment/config/online.yaml.
 
-Data paths (wasabi_data_dir, control_data_dir, offline.session_dir) are relative to this
-machine's data_root_prefix in machines.yaml, plus `paths.data_root` if set, as in RCP_analysis.
-Output files (output, history) go in the results folder of the session's source,
-<results_dir>/online, offline or simulation, with results_dir relative to the WASABI repo.
-Absolute paths are used as given. Unknown keys raise, so a typo in the YAML does not silently fall back to a default.
+The machine.yaml prefixes and `paths.data_root` are prepended to data_dir paths,
+such as wasabi_data_dir, control_data_dir, and offline.session_dir.
+
+Output files (output, history) go in the results folder of the session's source, <results_dir>/online, offline or simulation
+<results_dir> is relative to the WASABI repo
 """
 
 import socket
@@ -25,8 +25,8 @@ RESULTS_FOLDERS = {"online": "online", "offline": "offline", "sim": "simulation"
 @dataclass
 class PathsConfig:
     data_root: str = ""
-    wasabi_data_dir: str | None = None  # the RHX recording of the session
-    control_data_dir: str | None = None  # control trials: a recording folder with control_trials.npy, or a .npy
+    wasabi_data_dir: str | None = None  # the RHX recording of the wasabi session, including .dat files
+    control_data_dir: str | None = None  # control trials: a folder with control_trials.npy
     results_dir: str = "results"
     output: str = "next_stim.json"
     history: str | None = None
@@ -39,9 +39,9 @@ class SessionConfig:
     max_trials: int = 500
     seed: int = 0
     num_control: int = 100
-    # What starts reading the next trial: "keypress"; an IR input such as "DIGITAL-IN-02"
-    # (online only, the trial.ir_channel), as soon as a trial on it is complete; or "auto",
-    # straight away (sim, offline)
+    # Indicator for the next trial:
+    #   Online: "keypress" or an IR input such as "DIGITAL-IN-02"
+    #   Offline/Sim: "auto" (straight away)
     trigger: str = "keypress"
 
 
@@ -65,10 +65,10 @@ class RecordingConfig:
 class SpikeConfig:
     """Spike detection on amplifier.dat (see `intan_rt_proc.SpikeDetector`)."""
 
-    band_hz: tuple[float, float] = (300.0, 6000.0)
+    band_hz: tuple[float, float] = (300.0, 10000.0)
     filter_order: int = 3
     reference: str = "median"
-    threshold: float = 4.5
+    threshold: float = 4.0
     refractory_ms: float = 1.0
     noise_s: float = 10.0
     local_radius: tuple[float, float] | None = None  # (inner, outer) um; None: global reference
